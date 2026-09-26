@@ -16,14 +16,13 @@ export function SystemHealthPanel() {
   }, []);
 
   return (
-    <div className="panel" style={{ minWidth: 0 }}>
-      <div className="panel-header">
-        <Activity size={11} color="var(--color-primary)" />
-        <span className="label-md" style={{ color: 'var(--color-text)' }}>CHAIN HEALTH</span>
+    <div className="panel" style={{ minWidth: 0, borderRadius: 0, borderLeft: 'none', borderRight: 'none', borderTop: 'none', boxShadow: 'none' }}>
+      <div className="panel-header" style={{ borderRadius: 0, background: 'var(--color-lowest)', padding: '0.375rem 0.75rem' }}>
+        <Activity size={12} color="var(--color-primary)" />
+        <span className="label-md" style={{ color: 'var(--color-text-muted)' }}>NETWORK TELEMETRY</span>
       </div>
-      {/* Compact horizontal layout — avoids taking too much vertical space */}
-      <div style={{ padding: '0.3rem 0.625rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', overflow: 'hidden' }}>
-        <HealthRow label="BLOCK" value={`#${blockHeight.toLocaleString()}`} ok />
+      <div style={{ padding: '0.4rem 0.75rem', display: 'flex', gap: '1.5rem', flexWrap: 'wrap', overflow: 'hidden', background: 'var(--color-surface-2)' }}>
+        <HealthRow label="HEAD" value={`#${blockHeight.toLocaleString()}`} ok />
         <HealthRow label="GAS" value={`${gasPrice.base.toFixed(1)} / ${gasPrice.priority.toFixed(1)} GWEI`} ok />
         <HealthRow label="RPC" value={`${rpcStatus.toFixed(1)}%`} ok />
       </div>
@@ -33,10 +32,10 @@ export function SystemHealthPanel() {
 
 function HealthRow({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', overflow: 'hidden' }}>
       <span className={`status-dot ${ok ? 'status-dot-active' : 'status-dot-error'}`} style={{ flexShrink: 0 }} />
       <span className="label-sm" style={{ color: 'var(--color-text-faint)', flexShrink: 0 }}>{label}:</span>
-      <span className="code-terminal" style={{ color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+      <span className="code-terminal" style={{ color: 'var(--color-text)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
     </div>
   );
 }

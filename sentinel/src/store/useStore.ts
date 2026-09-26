@@ -3,15 +3,13 @@
 import { create } from 'zustand';
 import axios from 'axios';
 import type { TraceResult, WalletNode, FraudCluster } from '../types/graph';
-// import { traceWallet } from '../data/api';
+// All trace data is fetched exclusively from the live FastAPI backend. No mock fallbacks.
 
 export type Page =
+  | 'homepage'
   | 'graph-explorer'
-  | 'peeling-heuristics'
-  | 'fraud-rings'
-  | 'vasp-offramps'
-  | 'evidence-dossier'
-  | 'cypher-console';
+  | 'cypher-console'
+  | 'linked-transactions';
 
 interface AppState {
   // ── Trace (flat — avoids reference churn that causes infinite re-renders) ──
@@ -20,7 +18,7 @@ interface AppState {
   traceResult: TraceResult | null;
   traceLoading: boolean;
   traceError: string | null;
-  runTrace: (address: string, hops: number) => Promise<void>;
+  runTrace: (address: string, hops: number, limit?: number, epochSeconds?: number) => Promise<void>;
   clearTrace: () => void;
 
   // ── Graph interaction ──────────────────────────────────────────────────────
@@ -32,6 +30,12 @@ interface AppState {
 
   filterThreats: boolean;
   toggleFilterThreats: () => void;
+
+  graphDirection: 'ALL' | 'OUTBOUND' | 'INBOUND';
+  setGraphDirection: (direction: 'ALL' | 'OUTBOUND' | 'INBOUND') => void;
+
+  graphAssetFilter: 'ALL' | 'ETH' | 'TOKEN';
+  setGraphAssetFilter: (asset: 'ALL' | 'ETH' | 'TOKEN') => void;
 
   // ── Navigation ─────────────────────────────────────────────────────────────
   activePage: Page;
@@ -104,7 +108,13 @@ export const useStore = create<AppState>((set, get) => ({
     };
   },
 
-  runTrace: async (address, hops) => {
+  graphDirection: 'ALL', // Default to all transactions instead of purely outbound
+  setGraphDirection: (dir) => set({ graphDirection: dir }),
+
+  graphAssetFilter: 'ALL',
+  setGraphAssetFilter: (asset) => set({ graphAssetFilter: asset }),
+
+  runTrace: async (address, hops, limit = 100, epochSeconds = 0) => {
     set({
       traceAddress: address,
       traceHops: hops,
@@ -117,72 +127,58 @@ export const useStore = create<AppState>((set, get) => ({
     get().clearLog();
     startLogStream(buildTraceLogLines(address, hops), get().appendLog);
 
+    const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
     try {
-      // Yahan se purana 'traceWallet' hata diya aur FastAPI ko connect kiya:
-      const response = await axios.post('http://127.0.0.1:8000/analyze-wallet', {
-        txId: address
-      }, { timeout: 15000 });
+      // Live FastAPI backend call — no mock fallback
+      const response = await axios.post(`${API_URL}/analyze-wallet`, {
+        txId: address,
+        limit: limit,
+        epochSeconds: epochSeconds
+      }, { timeout: 120000 });
 
       const rawNodes = response.data.graph_data.nodes || [];
       const rawEdges = response.data.graph_data.edges || [];
+      const mlHit = response.data.ml_fraud_prediction_hit;
+
+      const realNodes = rawNodes;
+      const realEdges = rawEdges;
+
+      const maxRiskExtracted = realNodes.length > 0 ? Math.max(...realNodes.map((n: any) => n.riskScore)) : (mlHit ? 93 : 15);
+      const overallRisk = Math.round(maxRiskExtracted);
+
+      let totalValueTraced = realEdges.reduce((acc, curr) => acc + (curr.amount || 0), 0);
 
       const realData: TraceResult = {
         // ── Identity ───────────────────────────────────────────────────────
-        rootAddress:    address,
-        traceId:        `TRACE-${Date.now()}`,
-        caseId:         get().activeCase.id,
-        jurisdiction:   'IN',
+        rootAddress: address,
+        traceId: `TRACE-${Date.now()}`,
+        caseId: get().activeCase.id,
+        jurisdiction: 'IN',
         chainOfCustodyHash: Array.from({ length: 64 }, () =>
           Math.floor(Math.random() * 16).toString(16)).join('').toUpperCase(),
 
         // ── Risk ───────────────────────────────────────────────────────────
-        riskScore:      0,
-        threatVector:   'Under analysis — graph traversal complete',
+        riskScore: overallRisk,
+        threatVector: mlHit ? 'ML Fraud Cluster Signature Detected' : 'Structural graph analysis complete. Low risk.',
 
         // ── Financials ────────────────────────────────────────────────────
-        hops:                   5,
-        totalValueTraced:       0,
-        totalValueUsd:          0,
-        assetsRestricted:       0,
-        assetsRestrictedUsd:    0,
-        mixerHopCount:          0,
+        hops: hops,
+        totalValueTraced: totalValueTraced,
+        totalValueUsd: totalValueTraced * 2100,
+        assetsRestricted: 0,
+        assetsRestrictedUsd: 0,
+        mixerHopCount: 0,
 
-        // ── Nodes (with all required WalletNode fields defaulted) ─────────
-        nodes: rawNodes.map((n: any) => ({
-          id:          String(n.id),
-          label:       n.data?.label || String(n.id),
-          address:     n.data?.label || String(n.id),
-          type:        'intermediate' as const,
-          riskScore:   0,
-          balance:     0,
-          balanceUsd:  0,
-          firstSeen:   new Date().toISOString(),
-          lastActive:  new Date().toISOString(),
-          txCount:     0,
-          hopDepth:    0,
-          flagged:     false,
-          chain:       'ETH' as const,
-          clusterIds:  [],
-        })),
-
-        // ── Edges (with all required TxEdge fields defaulted) ─────────────
-        edges: rawEdges.map((e: any, i: number) => ({
-          id:             String(i),
-          source:         String(e.source),
-          target:         String(e.target),
-          type:           'normal' as const,
-          amount:         parseFloat(e.label) || 0,
-          amountUsd:      0,
-          percent:        100,
-          txHash:         '',
-          blockTimestamp: new Date().toISOString(),
-        })),
+        // ── Dynamic Structured Data ─────────
+        nodes: realNodes,
+        edges: realEdges,
 
         // ── Collections (safe empty arrays) ───────────────────────────────
-        clusters:    [],
+        clusters: [],
         vaspMatches: [],
-        watchlists:  [],
-        peelChain:   [],
+        watchlists: [],
+        peelChain: [],
+        ledgerTransactions: response.data.ledger_transactions || [],
 
         // ── Unused legacy fields kept for type compatibility ───────────────
         // @ts-ignore
@@ -192,12 +188,23 @@ export const useStore = create<AppState>((set, get) => ({
         metadata: { dateAnalyzed: new Date().toISOString(), dataSources: ['Neo4j', 'FastAPI'] },
       };
 
-      // State ko update kar diya
-      set({ traceResult: realData, traceLoading: false });
+      // State ko update kar diya aur automatically root node ko select kiya
+      const rootNode = realNodes.find((n: any) => n.address.toLowerCase() === address.toLowerCase()) || realNodes[0] || null;
+      set({ traceResult: realData, traceLoading: false, selectedNode: rootNode });
 
-
-    } catch (err) {
-      set({ traceResult: null, traceLoading: false, traceError: String(err) });
+    } catch (err: any) {
+      let errorMsg = 'Unknown error during trace.';
+      if (err?.code === 'ECONNABORTED') {
+        errorMsg = 'REQUEST TIMEOUT: Backend did not respond within 15 seconds. Etherscan ingestion may be slow — try again.';
+      } else if (err?.code === 'ERR_NETWORK' || err?.message?.includes('Network Error')) {
+        errorMsg = `CONNECTION FAILED: Backend server unreachable at ${API_URL}. Ensure uvicorn is running.`;
+      } else if (err?.response) {
+        errorMsg = `SERVER ERROR ${err.response.status}: ${err.response.data?.detail || err.response.statusText || 'Unknown server error'}`;
+      } else {
+        errorMsg = `TRACE FAILED: ${err?.message || String(err)}`;
+      }
+      get().appendLog(`[ERROR] ${errorMsg}`);
+      set({ traceResult: null, traceLoading: false, traceError: errorMsg });
     }
   },
 
@@ -214,7 +221,7 @@ export const useStore = create<AppState>((set, get) => ({
   toggleFilterThreats: () => set((s) => ({ filterThreats: !s.filterThreats })),
 
   // ── Navigation ─────────────────────────────────────────────────────────────
-  activePage: 'graph-explorer',
+  activePage: 'homepage',
   setActivePage: (page) => set({ activePage: page }),
 
   // ── Terminal log ───────────────────────────────────────────────────────────

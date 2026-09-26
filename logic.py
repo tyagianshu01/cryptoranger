@@ -11,7 +11,7 @@ def check_for_vasp(G, start_node):
         if vasp_lower in G.nodes:
             try:
                 path = nx.shortest_path(G, source=start_node.lower(), target=vasp_lower)
-                print(f"\n🚨 SCAMMER CAUGHT! Funds reached known VASP: {vasp}")
+                print(f"\n[ALERT] Funds reached known VASP: {vasp}")
                 print(" -> ".join(path))
                 return True
             except nx.NetworkXNoPath:

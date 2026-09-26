@@ -4,15 +4,16 @@ import { Sidebar } from './components/layout/Sidebar';
 import { TopHeader } from './components/layout/TopHeader';
 import { BottomTicker } from './components/layout/BottomTicker';
 import { GraphExplorer } from './pages/GraphExplorer';
-import { PeelingHeuristics, FraudRings, VaspOfframps, EvidenceDossier, CypherConsole } from './pages/placeholder';
+import { CypherConsole } from './pages/CypherConsole';
+import { LinkedTransactionsPage } from './pages/LinkedTransactionsPage';
+import { HomePage } from './pages/HomePage';
+import { SupportTerminal } from './components/panels/SupportTerminal';
 
 const PAGES: Record<string, React.ReactNode> = {
-  'graph-explorer':      <GraphExplorer />,
-  'peeling-heuristics':  <PeelingHeuristics />,
-  'fraud-rings':         <FraudRings />,
-  'vasp-offramps':       <VaspOfframps />,
-  'evidence-dossier':    <EvidenceDossier />,
-  'cypher-console':      <CypherConsole />,
+  'homepage': <HomePage />,
+  'graph-explorer': <GraphExplorer />,
+  'linked-transactions': <LinkedTransactionsPage />,
+  'cypher-console': <CypherConsole />
 };
 
 export default function App() {
@@ -40,14 +41,17 @@ export default function App() {
       </div>
 
       {/* Main content */}
-      <div style={{ gridRow: '2', gridColumn: '2', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        {PAGES[activePage] ?? <GraphExplorer />}
+      <div style={{ gridRow: '2', gridColumn: '2', overflowY: 'auto', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {PAGES[activePage] ?? <HomePage />}
       </div>
 
       {/* Bottom ticker */}
       <div style={{ gridRow: '3', gridColumn: '2', borderTop: '1px solid var(--color-border)', overflow: 'hidden', minWidth: 0 }}>
         <BottomTicker />
       </div>
+
+      {/* Global AI Chat Support Widget */}
+      <SupportTerminal />
     </div>
   );
 }

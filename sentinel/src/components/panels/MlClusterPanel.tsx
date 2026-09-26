@@ -3,9 +3,9 @@ import { Brain, ChevronRight } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 
 const SEVERITY_COLORS: Record<string, string> = {
-  CRITICAL:  'var(--color-secondary-dim)',
+  CRITICAL: 'var(--color-secondary-dim)',
   CONFIRMED: 'var(--color-tertiary)',
-  FLAGGED:   '#f59e0b',
+  FLAGGED: '#f59e0b',
   SUSPECTED: 'var(--color-text-muted)',
 };
 
@@ -78,7 +78,7 @@ export function MlClusterPanel() {
                 <circle cx="24" cy="24" r="18" fill="none" stroke="var(--color-primary)" strokeWidth="4"
                   strokeDasharray={`${JACCARD_INDEX * 113} 113`}
                   strokeLinecap="round" transform="rotate(-90 24 24)" />
-                <text x="24" y="26" textAnchor="middle" fill="var(--color-primary)" fontFamily="Space Grotesk" fontWeight="700" fontSize="10">{Math.round(JACCARD_INDEX * 100)}%</text>
+                <text x="24" y="26" textAnchor="middle" fill="var(--color-primary)" fontFamily="var(--font-sans)" fontWeight="700" fontSize="10">{Math.round(JACCARD_INDEX * 100)}%</text>
               </svg>
               <div>
                 <div className="label-md" style={{ color: 'var(--color-text)' }}>JACCARD INDEX: {JACCARD_INDEX.toFixed(3)}</div>

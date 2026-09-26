@@ -2,11 +2,9 @@ import React from 'react';
 import { InvestigationBanner } from '../components/summary/InvestigationBanner';
 import { BottomSummaryStrip } from '../components/summary/BottomSummaryStrip';
 
-// 🔥 THE MAGIC IS BACK: Uncommented our real canvas!
-import { GraphCanvas } from '../components/graph/GraphCanvas'; 
+import { GraphCanvas } from '../components/graph/GraphCanvas';
 
 import { GraphControls } from '../components/graph/GraphControls';
-import { SystemHealthPanel } from '../components/panels/SystemHealthPanel';
 import { InspectorDossier } from '../components/panels/InspectorDossier';
 import { useStore } from '../store/useStore';
 
@@ -14,13 +12,10 @@ export function GraphExplorer() {
   const traceResult = useStore((s) => s.traceResult);
   const result = traceResult;
 
-  // 🗑️ REMOVED THE NEOVIS DIRECT CONNECTION 🗑️
-  // Our FastAPI backend handles the DB now, not the frontend!
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
       {/* Investigation banner */}
-      <div style={{ flexShrink: 0, overflow: 'hidden' }}>
+      <div style={{ flexShrink: 0 }}>
         {result && <InvestigationBanner />}
       </div>
 
@@ -29,8 +24,7 @@ export function GraphExplorer() {
         flex: 1,
         display: 'grid',
         gridTemplateColumns: 'minmax(0, 1fr) 280px',
-        minHeight: 0,
-        overflow: 'hidden',
+        minHeight: '480px', // Resized down an additional 20% 
       }}>
 
         {/* ── Left/Center: Graph canvas ─────────────────────────────────── */}
@@ -46,11 +40,6 @@ export function GraphExplorer() {
           {/* Controls bar */}
           <div style={{ flexShrink: 0, overflow: 'hidden' }}>
             <GraphControls />
-          </div>
-
-          {/* System health */}
-          <div style={{ flexShrink: 0, overflow: 'hidden' }}>
-            <SystemHealthPanel />
           </div>
 
           {/* Graph Canvas — Our fixed ForceGraph goes here! */}

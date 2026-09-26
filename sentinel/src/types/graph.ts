@@ -29,6 +29,12 @@ export interface WalletNode {
   flagged: boolean;
   chain: 'ETH' | 'BTC' | 'TRX' | 'BNB';
   clusterIds?: string[];    // fraud cluster membership
+  mathMetrics?: {
+    degreeCentrality: number;
+    logVolume: number;
+    velocityPenalty: number;
+    mlBase: number;
+  };
 }
 
 export interface TxEdge {
@@ -93,6 +99,7 @@ export interface TraceResult {
   watchlists: string[];
   caseId: string;
   chainOfCustodyHash: string;
+  ledgerTransactions: any[];
 }
 
 // ForceGraph node/link shapes (extend from WalletNode / TxEdge)
