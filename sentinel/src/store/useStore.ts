@@ -127,7 +127,12 @@ export const useStore = create<AppState>((set, get) => ({
     get().clearLog();
     startLogStream(buildTraceLogLines(address, hops), get().appendLog);
 
-    const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+    let API_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+    if (API_URL.endsWith('/')) {
+      API_URL = API_URL.slice(0, -1);
+    }
+    console.log('[DEBUG] Calling API at:', API_URL);
+
     try {
       // Live FastAPI backend call — no mock fallback
       const response = await axios.post(`${API_URL}/analyze-wallet`, {
