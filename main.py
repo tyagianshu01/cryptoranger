@@ -68,8 +68,7 @@ def analyze_wallet(req: AnalyzeRequest):
     try:
         with GraphDatabase.driver(URI, auth=AUTH) as driver:
             records, _, _ = driver.execute_query(
-                cypher_specific, wallet_id=wallet_id, epoch=req.epochSeconds,
-                database_="neo4j"
+                cypher_specific, wallet_id=wallet_id, epoch=req.epochSeconds
             )
 
             for record in records:
