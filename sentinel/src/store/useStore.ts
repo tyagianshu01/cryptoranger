@@ -40,6 +40,8 @@ interface AppState {
   // ── Navigation ─────────────────────────────────────────────────────────────
   activePage: Page;
   setActivePage: (page: Page) => void;
+  sidebarOpen: boolean;
+  toggleSidebar: () => void;
 
   // ── Terminal log ───────────────────────────────────────────────────────────
   terminalLines: string[];
@@ -228,6 +230,8 @@ export const useStore = create<AppState>((set, get) => ({
   // ── Navigation ─────────────────────────────────────────────────────────────
   activePage: 'homepage',
   setActivePage: (page) => set({ activePage: page }),
+  sidebarOpen: window.innerWidth > 768, // Default collapsed on mobile
+  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 
   // ── Terminal log ───────────────────────────────────────────────────────────
   terminalLines: [

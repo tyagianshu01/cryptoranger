@@ -18,20 +18,32 @@ const PAGES: Record<string, React.ReactNode> = {
 
 export default function App() {
   const activePage = useStore((s) => s.activePage);
+  const sidebarOpen = useStore((s) => s.sidebarOpen);
 
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'var(--spacing-sidebar) minmax(0, 1fr)',
+        gridTemplateColumns: sidebarOpen ? 'var(--spacing-sidebar) minmax(0, 1fr)' : '0px minmax(0, 1fr)',
         gridTemplateRows: 'auto 1fr auto',
         height: '100vh',
         overflow: 'hidden',
         background: 'var(--color-base)',
+        transition: 'grid-template-columns 0.2s ease',
       }}
     >
       {/* Sidebar — spans all rows */}
-      <div style={{ gridRow: '1 / 4', gridColumn: '1', borderRight: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{
+        gridRow: '1 / 4',
+        gridColumn: '1',
+        borderRight: '1px solid var(--color-border)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        opacity: sidebarOpen ? 1 : 0,
+        visibility: sidebarOpen ? 'visible' : 'hidden',
+        transition: 'opacity 0.2s ease, visibility 0.2s ease'
+      }}>
         <Sidebar />
       </div>
 

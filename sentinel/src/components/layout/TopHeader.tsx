@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect } from "react";
 import {
   Search, Download, User, Clock,
-  Wifi, Database, Cpu, AlertTriangle, Globe
+  Wifi, Database, Cpu, AlertTriangle, Globe, Menu
 } from "lucide-react";
 import { useStore } from "../../store/useStore";
 
@@ -10,6 +10,7 @@ export function TopHeader() {
   const traceLoading = useStore((s) => s.traceLoading);
   const runTrace = useStore((s) => s.runTrace);
   const activeCase = useStore((s) => s.activeCase);
+  const toggleSidebar = useStore((s) => s.toggleSidebar);
 
   const [inputAddr, setInputAddr] = useState("");
   const [inputHops, setInputHops] = useState(5);
@@ -51,8 +52,18 @@ export function TopHeader() {
         overflow: "hidden", minWidth: 0,
         background: "var(--color-surface-2)",
       }}>
-        {/* Left: connection pills removed as requested */}
+        {/* Left: Hamburger menu */}
         <div style={{ display: "flex", gap: "0.5rem", overflow: "hidden", minWidth: 0 }}>
+          <button
+            onClick={toggleSidebar}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '4px', borderRadius: '4px', color: 'var(--color-primary)'
+            }}
+          >
+            <Menu size={16} />
+          </button>
         </div>
 
         {/* Right: Govt Branding + Clock + case */}
