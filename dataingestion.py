@@ -23,9 +23,11 @@ def _call_etherscan(address, action, offset=100):
         return []
     
     if response.status_code != 200:
+        print(f"Etherscan HTTP Error: {response.status_code} - {response.text}")
         return []
     data = response.json()
     if data.get("status") != "1":
+        print(f"Etherscan API Error (Address: {address}): {data.get('message')} - {data.get('result')}")
         return []
     return data["result"]
 
