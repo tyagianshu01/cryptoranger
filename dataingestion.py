@@ -4,8 +4,9 @@ from config import ETHERSCAN_API_KEY
 
 def _call_etherscan(address, action, offset=100):
     """Internal helper that hits a single Etherscan endpoint."""
-    url = "https://api.etherscan.io/api"
+    url = "https://api.etherscan.io/v2/api"
     params = {
+        "chainid": 1,
         "module": "account",
         "action": action,
         "address": address,
