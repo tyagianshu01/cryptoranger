@@ -1,73 +1,100 @@
+"""
+routers/chat.py
+---------------
+AI Chat Router upgraded with GraphRAG Intelligence.
+Seamlessly routes user inquiries through GraphRAG when forensic questions are asked,
+while maintaining platform support guidance and preserving full backward compatibility.
+"""
+
+import logging
 import os
-import httpx
+from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException
+import httpx
 from pydantic import BaseModel
-from typing import List, Dict
+
+from graphrag.schema import QueryIntent
+from graphrag.service import GraphRAGService
 
 router = APIRouter()
+logger = logging.getLogger("routers.chat")
+
 
 class ChatMessage(BaseModel):
     role: str
     content: str
 
+
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
 
-# The persona and knowledge base for the AI Support Terminal
-SUPPORT_SYSTEM_PROMPT = """You are 'Sentinel Support', an AI guidance operator for the 'National Cyber Forensics Intelligence Suite' (CryptoTracker).
-Your tone must be authoritative, concise, and highly professional, mimicking a military-grade or dark-ops cyber intelligence terminal.
 
-SYSTEM CONTEXT & FEATURES YOU KNOW ABOUT:
-1. GRAPH EXPLORER (Topology): Visualizes multi-hop on-chain fund flows. Users can see nodes (Wallets) and edges (Transactions). It checks for 'peel chains' and offramp movements to known VASPs (Virtual Asset Service Providers / Exchanges).
-2. TRACE ENGINE (Heuristic & ML): When a wallet is traced, the system queries Etherscan, models the transaction graph in Neo4j, and uses a Two-Pass Taint Contagion algorithm to calculate Counterparty Risk scores. A LightGBM ML model also profiles wallet behavior.
-3. CYPHER CONSOLE (Neo4j): A restricted sandbox where users can write raw Cypher queries to explore the Neo4j database. It has a hardware-level 'Read-Only Mutation Lock' to prevent deletions/tampering. It also features a natural-language-to-cypher AI generator.
-4. DOSSIER GENERATION: Generates Official Government Intelligence PDFs featuring WYSIWYG editing, Ashoka Stambh watermarks, and auto-injected threat telemetry for law enforcement submission (IT Act compliance).
+SUPPORT_SYSTEM_PROMPT = """You are 'Sentinel Support', an AI guidance operator for ChainTrace Analytics (CryptoTracker Sentinel).
+Your tone is authoritative, concise, and professional.
+
+SYSTEM CONTEXT & CAPABILITIES:
+1. GRAPH EXPLORER: Multi-hop on-chain fund flows, peel chains, and off-ramp identification to known VASPs.
+2. TRACE ENGINE: Calibrated ML fraud classification (LightGBM) and forward haircut taint contagion.
+3. CYPHER CONSOLE: Sandbox to run read-only Cypher queries on the Neo4j knowledge graph.
+4. DOSSIER EXPORT: Generates neutral, court-ready blockchain intelligence reports and subpoena lead lists.
+5. GRAPHRAG INTELLIGENCE: Direct contextual query over the transaction graph and community clusters.
 
 RULES:
-- Answer questions ONLY about the platform features, cryptocurrency tracking, money laundering, and graph forensics.
-- If the user asks you to write Cypher queries, give them a brief answer but instruct them to use the dedicated 'AI Query Architect' in the Cypher Console tab.
-- Keep answers relatively short, punchy, and formatted neatly. Do not output massive essays.
-- Emphasize the security, read-only locks, and advanced 'Taint Contagion' engine.
+- Answer questions clearly about platform features, cryptocurrency tracking, money laundering, and graph forensics.
+- Keep answers relatively short, punchy, and formatted neatly with markdown.
 """
+
 
 @router.post("/chat/message")
 async def chat_message(req: ChatRequest):
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is not set.")
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="No messages provided.")
 
-    # Prepare the payload by prefixing our powerful system prompt
-    payload_messages = [{"role": "system", "content": SUPPORT_SYSTEM_PROMPT}]
-    
-    # Append the recent conversation history (max last 5 messages to save tokens)
-    recent_history = req.messages[-5:]
-    for msg in recent_history:
-        payload_messages.append({"role": msg.role, "content": msg.content})
+    latest_msg = req.messages[-1].content.strip()
+    history = [m.model_dump() for m in req.messages[:-1]]
 
+    # 1. Route through GraphRAG
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "openai/gpt-4o-mini",
-                    "messages": payload_messages,
-                    "temperature": 0.3,
-                    "max_tokens": 400
-                },
-                timeout=30.0
-            )
-            
-            if not response.is_success:
-                raise Exception(f"HTTP {response.status_code}: {response.text}")
-                
-            data = response.json()
-            
-        ai_reply = data["choices"][0]["message"]["content"].strip()
-        return {"content": ai_reply}
-        
+        service = GraphRAGService.get_instance()
+        intent_classification = service.router.classify_intent(latest_msg)
+
+        # If it's a general support question without on-chain entities or graph requests,
+        # provide guidance using the Sentinel persona
+        if intent_classification.intent == QueryIntent.GENERAL_SUPPORT and not intent_classification.extracted_addresses:
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            if not api_key:
+                raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is not set.")
+
+            payload_messages = [{"role": "system", "content": SUPPORT_SYSTEM_PROMPT}]
+            for msg in req.messages[-5:]:
+                payload_messages.append({"role": msg.role, "content": msg.content})
+
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                res = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": "openai/gpt-4o-mini",
+                        "messages": payload_messages,
+                        "temperature": 0.3,
+                        "max_tokens": 450
+                    }
+                )
+                if not res.is_success:
+                    raise Exception(f"HTTP {res.status_code}: {res.text}")
+                data = res.json()
+                ai_reply = data["choices"][0]["message"]["content"].strip()
+                return {"content": ai_reply, "intent": "general_support", "citations": []}
+
+        # Otherwise, query GraphRAG over on-chain Neo4j context
+        response = await service.query(latest_msg, chat_history=history)
+        return {
+            "content": response.answer,
+            "citations": [c.model_dump() for c in response.citations],
+            "intent": response.intent.value,
+            "context_summary": response.context_summary
+        }
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Comms Relaying Failed: {str(e)}")
+        logger.error(f"Error handling chat message: {e}")
+        raise HTTPException(status_code=500, detail=f"AI Intelligence Query Failed: {str(e)}")

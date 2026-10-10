@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
+import { Activity } from 'lucide-react';
 
 export function BottomTicker() {
   const traceResult = useStore((s) => s.traceResult);
-  const result = traceResult;
   const [blockHeight, setBlockHeight] = useState(21489102);
 
   useEffect(() => {
@@ -12,15 +12,15 @@ export function BottomTicker() {
   }, []);
 
   const items = [
-    { label: 'MEMPOOL LISTENER', value: 'ONLINE (0.02s POLL)', ok: true },
-    { label: 'ALCH:ETHERSCAN RPC', value: '99.99% RESILIENCE', ok: true },
-    { label: 'ACTIVE BLOCK', value: blockHeight.toLocaleString(), ok: true },
-    { label: 'BASE FEE', value: '18.4 GWEI', ok: true },
-    { label: 'SYSTEM', value: 'SENTINEL-DEFENSE-X', ok: true },
-    { label: 'CLEARANCE', value: 'LEVEL 5 LAW-ENFORCEMENT', ok: true },
-    ...(result ? [
-      { label: 'TRACE ID', value: result.traceId, ok: true },
-      { label: 'RISK', value: `${result.riskScore}/100`, ok: result.riskScore < 50 },
+    { label: 'ETH Block',     value: blockHeight.toLocaleString() },
+    { label: 'Data source',   value: 'Etherscan v2 API' },
+    { label: 'Graph DB',      value: 'Neo4j 5.x' },
+    { label: 'ML engine',     value: 'LightGBM' },
+    { label: 'Query mode',    value: 'Read-only enforced' },
+    ...(traceResult ? [
+      { label: 'Trace ID',  value: traceResult.traceId },
+      { label: 'Risk score', value: `${traceResult.riskScore}/100` },
+      { label: 'Nodes',     value: traceResult.nodes.length.toString() },
     ] : []),
   ];
 
@@ -28,22 +28,31 @@ export function BottomTicker() {
 
   return (
     <div style={{
-      height: '24px', overflow: 'hidden',
+      height: '22px', overflow: 'hidden',
       background: 'var(--color-surface-2)',
+      borderTop: '1px solid var(--color-border)',
       display: 'flex', alignItems: 'center',
     }}>
-      <div className="ticker-inner" style={{ gap: '2rem' }}>
-        {doubled.map((item, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexShrink: 0 }}>
-            <span className="label-sm" style={{ color: 'var(--color-text-faint)' }}>{item.label}:</span>
-            <span className="code-terminal" style={{ color: item.ok ? 'var(--color-primary)' : 'var(--color-secondary-dim)' }}>
-              {item.value}
-            </span>
-            <span style={{ color: 'var(--color-border)', marginLeft: '0.5rem' }}>|</span>
-          </div>
-        ))}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '0.5rem',
+        padding: '0 0.625rem', borderRight: '1px solid var(--color-border)', flexShrink: 0,
+      }}>
+        <Activity size={10} color="var(--color-primary)" />
+        <span className="label-sm" style={{ color: 'var(--color-text-faint)' }}>Live</span>
+      </div>
+      <div style={{ overflow: 'hidden', flex: 1 }}>
+        <div className="ticker-inner" style={{ gap: '2rem' }}>
+          {doubled.map((item, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexShrink: 0 }}>
+              <span className="label-sm" style={{ color: 'var(--color-text-faint)' }}>{item.label}</span>
+              <span className="code-terminal" style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>
+                {item.value}
+              </span>
+              <span style={{ color: 'var(--color-border-strong)', marginLeft: '0.5rem' }}>·</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
 }
-

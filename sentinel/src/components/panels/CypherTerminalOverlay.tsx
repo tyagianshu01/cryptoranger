@@ -84,9 +84,9 @@ export function CypherTerminalOverlay({ onClose }: { onClose: () => void }) {
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <Terminal color="var(--color-primary)" />
-                    <h2 className="title-md" style={{ color: 'var(--color-text)' }}>NEO4J FORENSIC SANDBOX</h2>
-                    <span className="badge-base" style={{ background: '#FECACA', color: '#B91C1C', borderColor: '#F87171', marginLeft: '1rem' }}>
-                        <Shield size={10} /> READ-ONLY MUTATION LOCK ACTIVE
+                    <h2 className="title-md" style={{ color: 'var(--color-text)' }}>Query Console</h2>
+                    <span className="badge-base badge-danger" style={{ marginLeft: '1rem' }}>
+                        <Shield size={10} /> Read-only mode
                     </span>
                 </div>
                 <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--color-text-faint)', cursor: 'pointer' }}>

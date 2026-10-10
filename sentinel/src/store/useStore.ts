@@ -1,8 +1,8 @@
-// ─── Sentinel — Zustand App Store (flat state version) ───────────────────────
+// ─── ChainTrace — Zustand App Store (flat state version) ───────────────────────
 
 import { create } from 'zustand';
 import axios from 'axios';
-import type { TraceResult, WalletNode, FraudCluster } from '../types/graph';
+import type { TraceResult, WalletNode, FraudCluster, VaspMatch } from '../types/graph';
 // All trace data is fetched exclusively from the live FastAPI backend. No mock fallbacks.
 
 export type Page =
@@ -143,30 +143,51 @@ export const useStore = create<AppState>((set, get) => ({
         epochSeconds: epochSeconds
       }, { timeout: 120000 });
 
-      const rawNodes = response.data.graph_data.nodes || [];
-      const rawEdges = response.data.graph_data.edges || [];
+      const rawNodes = response.data.graph_data?.nodes || [];
+      const rawEdges = response.data.graph_data?.edges || [];
       const mlHit = response.data.ml_fraud_prediction_hit;
+      const offRampRecords = response.data.off_ramp_leads?.offRamps || [];
 
       const realNodes = rawNodes;
       const realEdges = rawEdges;
 
-      const maxRiskExtracted = realNodes.length > 0 ? Math.max(...realNodes.map((n: any) => n.riskScore)) : (mlHit ? 93 : 15);
-      const overallRisk = Math.round(maxRiskExtracted);
+      // Section 6: Overall case risk excluding off-ramps and victims
+      const overallRisk = typeof response.data.overallRisk === 'number'
+        ? response.data.overallRisk
+        : (realNodes.length > 0
+            ? Math.max(...realNodes.filter((n: any) => n.type !== 'off_ramp' && n.type !== 'victim').map((n: any) => n.riskScore || 0), 0)
+            : (mlHit ? 75 : 15));
 
-      let totalValueTraced = realEdges.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+      const severityTier = response.data.severityTier || (overallRisk >= 75 ? 'CRITICAL' : overallRisk >= 50 ? 'ELEVATED' : 'LOW');
+      let totalValueTraced = realEdges.reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
+
+      // Populate vaspMatches from Stage 5 off-ramps
+      const vaspMatches: VaspMatch[] = offRampRecords.map((o: any) => ({
+        nodeId: o.address,
+        exchange: o.entity,
+        jurisdiction: 'Global',
+        confidence: Math.round((o.conf || 0) * 100),
+        frozen: false,
+        mlLabel: o.confidence_label || 'confirmed',
+      }));
+
+      const topOffRamp = offRampRecords[0];
+      const threatDesc = topOffRamp
+        ? `${severityTier} · Lead: ${topOffRamp.severity} (${topOffRamp.entity}, ${topOffRamp.hops} hops, ${topOffRamp.taintedEth} ETH tainted)`
+        : `${severityTier} · Forensic graph analysis complete`;
 
       const realData: TraceResult = {
         // ── Identity ───────────────────────────────────────────────────────
         rootAddress: address,
         traceId: `TRACE-${Date.now()}`,
         caseId: get().activeCase.id,
-        jurisdiction: 'IN',
+        jurisdiction: 'Global',
         chainOfCustodyHash: Array.from({ length: 64 }, () =>
           Math.floor(Math.random() * 16).toString(16)).join('').toUpperCase(),
 
         // ── Risk ───────────────────────────────────────────────────────────
         riskScore: overallRisk,
-        threatVector: mlHit ? 'ML Fraud Cluster Signature Detected' : 'Structural graph analysis complete. Low risk.',
+        threatVector: threatDesc,
 
         // ── Financials ────────────────────────────────────────────────────
         hops: hops,
@@ -174,25 +195,29 @@ export const useStore = create<AppState>((set, get) => ({
         totalValueUsd: totalValueTraced * 2100,
         assetsRestricted: 0,
         assetsRestrictedUsd: 0,
-        mixerHopCount: 0,
+        mixerHopCount: response.data.case_metrics?.peelChainsCount || 0,
 
         // ── Dynamic Structured Data ─────────
         nodes: realNodes,
         edges: realEdges,
 
-        // ── Collections (safe empty arrays) ───────────────────────────────
+        // ── Collections ───────────────────────────────────────────────────
         clusters: [],
-        vaspMatches: [],
+        vaspMatches: vaspMatches,
         watchlists: [],
         peelChain: [],
         ledgerTransactions: response.data.ledger_transactions || [],
 
-        // ── Unused legacy fields kept for type compatibility ───────────────
+        // ── Extended v2.1 fields ───────────────────────────────────────────
+        // @ts-ignore
+        truncated: Boolean(response.data.truncated),
+        // @ts-ignore
+        offRampLeads: response.data.off_ramp_leads || null,
         // @ts-ignore
         alerts: [], tags: [], flags: [], riskFactors: [], recentTransactions: [],
         balance: 0, fiatValue: 0,
-        metrics: { riskScore: 0, severity: 'Unknown', totalTransactions: rawNodes.length, totalVolume: 0 },
-        metadata: { dateAnalyzed: new Date().toISOString(), dataSources: ['Neo4j', 'FastAPI'] },
+        metrics: { riskScore: overallRisk, severity: severityTier, totalTransactions: realEdges.length, totalVolume: totalValueTraced },
+        metadata: { dateAnalyzed: new Date().toISOString(), dataSources: ['Neo4j', 'FastAPI', 'LightGBM'] },
       };
 
       // State ko update kar diya aur automatically root node ko select kiya
@@ -235,14 +260,14 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ── Terminal log ───────────────────────────────────────────────────────────
   terminalLines: [
-    '[SYS]  SENTINEL GRAPH FORENSICS — INITIALIZED',
-    '[SYS]  GDS 5.18 | Neo4j 5.x Cluster | ML Engine v3.1',
-    '[SYS]  Awaiting trace target...',
+    '[SYS]  ChainTrace Analytics — Initialized',
+    '[SYS]  Neo4j 5.x cluster | ML engine ready',
+    '[SYS]  Awaiting trace target…',
   ],
   appendLog: (line) => set((s) => ({ terminalLines: [...s.terminalLines.slice(-199), line] })),
-  clearLog: () => set({ terminalLines: ['[SYS]  ─────────────────────────────────────', '[SYS]  NEW TRACE INITIATED', '[SYS]  ─────────────────────────────────────'] }),
+  clearLog: () => set({ terminalLines: ['[SYS]  ─────────────────────────────────────', '[SYS]  New trace initiated', '[SYS]  ─────────────────────────────────────'] }),
 
   // ── Active case ────────────────────────────────────────────────────────────
-  activeCase: { id: 'CASE-9041', operation: 'DARKPEEL' },
+  activeCase: { id: 'REPORT-9041', operation: 'TRACE' },
 }));
 

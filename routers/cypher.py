@@ -67,7 +67,7 @@ async def generate_cypher(req: CypherGenerateRequest):
             lines = raw_cypher.split("\n")
             if len(lines) > 2:
                 raw_cypher = "\n".join(lines[1:-1])
-                
+
         return {"query": raw_cypher.strip()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM Generation Error: {str(e)}")

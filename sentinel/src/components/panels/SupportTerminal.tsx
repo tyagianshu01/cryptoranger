@@ -2,15 +2,24 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, X, Send, Bot, Shield, Loader, Activity } from 'lucide-react';
 import axios from 'axios';
 
+interface Citation {
+    citation_type: string;
+    identifier: string;
+    label?: string;
+    detail?: string;
+}
+
 interface Message {
     role: 'user' | 'assistant';
     content: string;
+    citations?: Citation[];
+    intent?: string;
 }
 
 export function SupportTerminal() {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
-        { role: 'assistant', content: 'INITIALIZING SENTINEL SUPPORT HUB...\n\nConnection established. I am the AI guide for the CryptoTracker Forensics suite. How can I assist you with the Graph Explorer, Cypher Sandbox, or Threat Ledger today?' }
+        { role: 'assistant', content: 'Hi! I\'m the ChainTrace AI assistant powered by GraphRAG. I can trace fund flows, analyze wallet neighborhoods, inspect peel chains, or guide you through the platform. What would you like to investigate?' }
     ]);
     const [inputVal, setInputVal] = useState('');
     const [isTyping, setIsTyping] = useState(false);
@@ -38,12 +47,17 @@ export function SupportTerminal() {
                 messages: [...messages, userMessage]
             });
 
-            setMessages(prev => [...prev, { role: 'assistant', content: response.data.content }]);
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: response.data.content,
+                citations: response.data.citations,
+                intent: response.data.intent
+            }]);
         } catch (err: any) {
             console.error(err);
             setMessages(prev => [...prev, {
                 role: 'assistant',
-                content: `[SYSTEM ERROR] Comms link failed: ${err.response?.data?.detail || err.message}`
+                content: `Error: ${err.response?.data?.detail || err.message}`
             }]);
         } finally {
             setIsTyping(false);
@@ -100,19 +114,19 @@ export function SupportTerminal() {
 
                     {/* Header */}
                     <div style={{
-                        background: 'var(--color-navy)',
+                        background: 'var(--color-surface-2)',
                         padding: '1rem 1.25rem',
                         display: 'flex', alignItems: 'center', gap: '0.75rem',
                     }}>
-                        <div style={{ background: 'rgba(255,255,255,0.1)', padding: '0.375rem', borderRadius: '6px' }}>
-                            <Bot size={18} color="#FFF" />
+                        <div style={{ background: 'var(--color-primary-container)', padding: '0.375rem', borderRadius: '6px' }}>
+                            <Bot size={18} color="var(--color-primary)" />
                         </div>
                         <div>
-                            <div style={{ fontFamily: 'var(--font-serif)', fontSize: '14px', fontWeight: 600, color: '#FFF', letterSpacing: '0.5px' }}>
-                                SENTINEL AI PROTOCOL
+                            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', letterSpacing: '-0.01em' }}>
+                                ChainTrace Assistant
                             </div>
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(255,255,255,0.6)', letterSpacing: '0.5px' }}>
-                                NODE LINK ACTIVE · SECURE CHAN
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-text-faint)', letterSpacing: '0.04em' }}>
+                                AI-powered help
                             </div>
                         </div>
                     </div>
@@ -123,7 +137,7 @@ export function SupportTerminal() {
                         overflowY: 'auto',
                         padding: '1.25rem',
                         display: 'flex', flexDirection: 'column', gap: '1rem',
-                        background: 'var(--color-surface-base)'
+                        background: 'var(--color-base)'
                     }}>
                         {messages.map((msg, idx) => (
                             <div key={idx} style={{
@@ -138,9 +152,9 @@ export function SupportTerminal() {
                                     color: 'var(--color-text-faint)', letterSpacing: '0.5px'
                                 }}>
                                     {msg.role === 'assistant' ? (
-                                        <><Shield size={10} color="var(--color-primary)" /> SYSTEM</>
+                                        <><Bot size={10} color="var(--color-primary)" /> Assistant</>
                                     ) : (
-                                        <>OPS <Activity size={10} /></>
+                                        <>You <Activity size={10} /></>
                                     )}
                                 </div>
                                 <div style={{
@@ -155,6 +169,34 @@ export function SupportTerminal() {
                                     border: msg.role === 'assistant' ? '1px solid var(--color-border)' : 'none'
                                 }}>
                                     {msg.content}
+                                    {msg.citations && msg.citations.length > 0 && (
+                                        <div style={{
+                                            marginTop: '0.625rem',
+                                            paddingTop: '0.5rem',
+                                            borderTop: '1px dashed var(--color-border)',
+                                            display: 'flex',
+                                            flexWrap: 'wrap',
+                                            gap: '0.25rem'
+                                        }}>
+                                            <div style={{ width: '100%', fontSize: '10px', color: 'var(--color-text-faint)', fontFamily: 'var(--font-mono)', marginBottom: '2px' }}>
+                                                Verified Citations:
+                                            </div>
+                                            {msg.citations.slice(0, 4).map((cit, cIdx) => (
+                                                <span key={cIdx} title={cit.detail || cit.identifier} style={{
+                                                    fontSize: '10px',
+                                                    padding: '2px 6px',
+                                                    borderRadius: '4px',
+                                                    background: 'var(--color-surface-2)',
+                                                    border: '1px solid var(--color-border)',
+                                                    color: cit.citation_type === 'vasp' ? 'var(--color-accent)' : 'var(--color-text)',
+                                                    fontFamily: 'var(--font-mono)'
+                                                }}>
+                                                    {cit.citation_type === 'vasp' ? '🏦 ' : cit.citation_type === 'transaction' ? '⚡ ' : '👛 '}
+                                                    {cit.label || `${cit.identifier.slice(0, 6)}...${cit.identifier.slice(-4)}`}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -163,7 +205,7 @@ export function SupportTerminal() {
                             <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
                                 <Loader className="spin" size={14} color="var(--color-primary)" />
                                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-text-faint)' }}>
-                                    AWAITING TELEMETRY...
+                                    Thinking…
                                 </span>
                             </div>
                         )}

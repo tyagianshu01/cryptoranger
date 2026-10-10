@@ -215,7 +215,6 @@ RETURN
   erc20UniqRecTokenName
 """
 
-
 def get_ml_features(driver, wallet_address):
     """
     Queries Neo4j to compute the 48 aggregated features for a single wallet.

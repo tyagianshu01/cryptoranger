@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DollarSign, Repeat, Lock, Clock, FileText } from 'lucide-react';
+import { TrendingUp, Repeat, Lock, FileText } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { DossierEditorOverlay } from '../panels/DossierEditorOverlay';
 
@@ -11,72 +11,70 @@ export function BottomSummaryStrip() {
 
   const cards = [
     {
-      icon: <DollarSign size={14} color="var(--color-primary)" />,
-      label: 'TOTAL VALUE TRACED',
+      icon: <TrendingUp size={13} color="var(--color-primary)" />,
+      label: 'Total volume traced',
       value: `$${result.totalValueUsd.toLocaleString()} USD`,
-      sub: 'CONFIRMED',
+      sub: `${result.totalValueTraced.toFixed(3)} ETH`,
       color: 'var(--color-primary)',
     },
     {
-      icon: <Repeat size={14} color="var(--color-secondary-dim)" />,
-      label: `TORNADO CASH RUNS`,
-      value: `${result.mixerHopCount} HOPS`,
-      sub: 'DETECTED',
-      color: 'var(--color-secondary-dim)',
+      icon: <Repeat size={13} color="var(--color-warn)" />,
+      label: 'Mixer hops detected',
+      value: `${result.mixerHopCount}`,
+      sub: result.mixerHopCount > 0 ? 'Pattern found' : 'None detected',
+      color: 'var(--color-warn)',
     },
     {
-      icon: <Lock size={14} color="var(--color-tertiary)" />,
-      label: 'ASSETS RESTRICTED',
-      value: result.assetsRestrictedUsd > 0
-        ? `$${result.assetsRestrictedUsd.toLocaleString()} (${result.vaspMatches.find(v => v.frozen)?.freezeAuthority ?? 'PENDING'})`
-        : '$0 — NOT YET FROZEN',
-      sub: result.assetsRestrictedUsd > 0 ? 'FROZEN' : 'PENDING',
-      color: 'var(--color-tertiary)',
+      icon: <Lock size={13} color="var(--color-text-muted)" />,
+      label: 'VASP offramps',
+      value: result.vaspMatches.length > 0
+        ? `${result.vaspMatches.length} identified`
+        : 'None detected',
+      sub: result.vaspMatches.map(v => v.exchange).join(', ') || '—',
+      color: 'var(--color-text-muted)',
     },
   ];
 
   return (
-    <div style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-surface-1)', padding: '0.5rem', maxHeight: '150px', overflowY: 'auto' }}>
+    <div style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-surface-1)', padding: '0.5rem', maxHeight: '140px', overflowY: 'auto' }}>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         {cards.map((c, i) => (
           <div key={i} style={{
-            flex: '1 1 300px', display: 'flex', alignItems: 'center', gap: '0.75rem',
-            background: 'var(--color-surface-2)', border: `1px solid var(--color-border)`,
-            borderRadius: '0.375rem', padding: '0.5rem 0.75rem',
+            flex: '1 1 220px', display: 'flex', alignItems: 'center', gap: '0.625rem',
+            background: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)', padding: '0.5rem 0.75rem',
           }}>
             <div style={{
-              width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
+              width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0,
               background: 'var(--color-surface-3)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               {c.icon}
             </div>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div className="label-sm" style={{ color: 'var(--color-text-faint)' }}>{c.label}</div>
-              <div className="headline-sm" style={{ color: c.color, fontFamily: 'var(--font-sans)' }}>{c.value}</div>
-              <div className="badge-base badge-neutral" style={{ marginTop: '2px' }}>{c.sub}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 600, color: c.color }}>{c.value}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.sub}</div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Generate Dossier Button appended below metrics */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.75rem' }}>
+      {/* Generate Report Button */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.625rem' }}>
         <button
           onClick={() => setShowDossier(true)}
+          className="btn btn-primary"
           style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
-            padding: '0.75rem 2rem', background: 'var(--color-primary)',
-            color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer',
-            fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px', transition: 'background 0.2s',
-            width: '40%'
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.375rem',
+            padding: '0.5rem 1.5rem', width: '280px', fontSize: '12px',
           }}
         >
-          <FileText size={16} /> GENERATE FULL DOSSIER PDF
+          <FileText size={13} /> Generate report
         </button>
       </div>
 
       {showDossier && <DossierEditorOverlay onClose={() => setShowDossier(false)} />}
-    </div >
+    </div>
   );
 }

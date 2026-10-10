@@ -1,24 +1,22 @@
-﻿import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
-  Search, Download, User, Clock,
-  Wifi, Database, Cpu, AlertTriangle, Globe, Menu
+  Search, Clock, Menu, ChevronDown, Loader2, AlertCircle, X,
 } from "lucide-react";
 import { useStore } from "../../store/useStore";
 
 export function TopHeader() {
-  const traceResult = useStore((s) => s.traceResult);
+  const traceResult  = useStore((s) => s.traceResult);
   const traceLoading = useStore((s) => s.traceLoading);
-  const runTrace = useStore((s) => s.runTrace);
-  const activeCase = useStore((s) => s.activeCase);
+  const traceError   = useStore((s) => s.traceError);
+  const runTrace     = useStore((s) => s.runTrace);
   const toggleSidebar = useStore((s) => s.toggleSidebar);
 
-  const [inputAddr, setInputAddr] = useState("");
-  const [inputHops, setInputHops] = useState(5);
-  const [inputLimit, setInputLimit] = useState(100);
+  const [inputAddr, setInputAddr]         = useState("");
+  const [inputHops, setInputHops]         = useState(5);
+  const [inputLimit, setInputLimit]       = useState(100);
   const [inputEpochDate, setInputEpochDate] = useState("");
-
-  const [time, setTime] = useState(() => new Date());
-  const [lang, setLang] = useState<'en' | 'hi'>('en');
+  const [showFilters, setShowFilters]     = useState(false);
+  const [time, setTime]                   = useState(() => new Date());
 
   useEffect(() => {
     const id = setInterval(() => setTime(new Date()), 1000);
@@ -28,315 +26,256 @@ export function TopHeader() {
   const handleTrace = () => {
     if (inputAddr.trim()) {
       let epoch = 0;
-      if (inputEpochDate) {
-        epoch = Math.floor(new Date(inputEpochDate).getTime() / 1000);
-      }
+      if (inputEpochDate) epoch = Math.floor(new Date(inputEpochDate).getTime() / 1000);
       runTrace(inputAddr.trim(), inputHops, inputLimit, epoch);
     }
   };
 
   const riskScore = traceResult?.riskScore ?? 0;
-  const riskColor =
-    riskScore >= 80 ? "var(--color-secondary-dim)" :
-      riskScore >= 50 ? "var(--color-accent)" :
-        "var(--color-india-green)";
+  const riskColor = riskScore >= 80 ? "var(--color-danger)" : riskScore >= 50 ? "var(--color-warn)" : "var(--color-success)";
 
   return (
     <div style={{ background: "var(--color-surface-1)" }}>
 
-      {/* Row 1: Status bar */}
+      {/* Row 1: Top bar */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.25rem 1rem",
+        padding: "0 0.875rem",
         borderBottom: "1px solid var(--color-border)",
-        overflow: "hidden", minWidth: 0,
+        height: "36px", overflow: "hidden", minWidth: 0,
         background: "var(--color-surface-2)",
       }}>
-        {/* Left: Hamburger menu */}
-        <div style={{ display: "flex", gap: "0.5rem", overflow: "hidden", minWidth: 0 }}>
-          <button
-            onClick={toggleSidebar}
-            style={{
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: '4px', borderRadius: '4px', color: 'var(--color-primary)'
-            }}
-          >
-            <Menu size={16} />
-          </button>
-        </div>
+        {/* Left: menu toggle */}
+        <button
+          onClick={toggleSidebar}
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '4px', borderRadius: '4px', color: 'var(--color-text-muted)',
+          }}
+          aria-label="Toggle sidebar"
+        >
+          <Menu size={15} />
+        </button>
 
-        {/* Right: Govt Branding + Clock + case */}
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexShrink: 0 }}>
-
-          {/* External Govt Links / Language */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", borderRight: "1px solid var(--color-surface-4)", paddingRight: "1rem" }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', cursor: 'pointer' }} onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}>
-              <Globe size={11} color="var(--color-primary)" />
-              <span className="label-sm" style={{ color: lang === 'en' ? 'var(--color-primary)' : 'var(--color-text-faint)' }}>EN</span>
-              <span className="label-sm" style={{ color: 'var(--color-text-faint)' }}>|</span>
-              <span style={{ fontFamily: 'var(--font-serif)', fontSize: '11px', fontWeight: lang === 'hi' ? 700 : 500, color: lang === 'hi' ? 'var(--color-primary)' : 'var(--color-text-faint)', marginTop: '1px' }}>हिन्दी</span>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+        {/* Right: clock + session chip */}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.875rem", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
             <Clock size={10} color="var(--color-text-faint)" />
-            <span className="label-sm" style={{ color: "var(--color-text-muted)" }}>
-              {time.toLocaleTimeString("en-US", { hour12: false })} IST
+            <span className="label-sm" style={{ color: "var(--color-text-muted)", fontFamily: 'var(--font-mono)', fontSize: '10px' }}>
+              {time.toLocaleTimeString("en-US", { hour12: false })} UTC+5:30
             </span>
           </div>
-          <div style={{
-            display: "flex", alignItems: "center", gap: "0.5rem",
-            padding: "0.15rem 0.625rem",
-            background: "var(--color-surface-1)", borderRadius: "2px",
-            border: "1px solid var(--color-border)",
-          }}>
-            <span className="label-sm" style={{ color: "var(--color-text-faint)" }}>CASE</span>
-            <span className="code-terminal" style={{ color: "var(--color-primary)" }}>{activeCase.id}</span>
-          </div>
-          <div style={{
-            display: "flex", alignItems: "center", gap: "0.25rem",
-            padding: "0.15rem 0.625rem",
-            background: "var(--color-surface-1)", borderRadius: "999px",
-            border: "1px solid var(--color-border)",
-          }}>
-            <User size={10} color="var(--color-text-faint)" />
-            <span className="label-sm" style={{ color: "var(--color-text)" }}>DIRECTORATE 04</span>
-          </div>
+          {traceResult && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: "0.375rem",
+              padding: "0.125rem 0.5rem",
+              background: "var(--color-surface-3)", borderRadius: "var(--radius-sm)",
+              border: "1px solid var(--color-border-strong)",
+            }}>
+              <span className="status-dot status-dot-active" />
+              <span className="label-sm" style={{ color: "var(--color-text-muted)" }}>Trace active</span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Row 2: Wallet trace command bar */}
+      {/* Row 2: Search bar */}
       <div style={{
         display: "flex", alignItems: "center", gap: "0.5rem",
-        padding: "0.625rem 1rem",
+        padding: "0.5rem 0.875rem",
         borderBottom: "1px solid var(--color-border)",
         overflow: "hidden", minWidth: 0,
       }}>
         {/* Address input */}
         <div style={{
           flex: 1, display: "flex", alignItems: "center", gap: "0.5rem",
-          background: "var(--color-surface-1)",
-          border: "2px solid var(--color-border)",
-          borderRadius: "0.375rem",
-          padding: "0.4rem 0.75rem",
+          background: "var(--color-surface-2)",
+          border: "1px solid var(--color-border-strong)",
+          borderRadius: "var(--radius-md)",
+          padding: "0.375rem 0.75rem",
           minWidth: 0,
-          boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.02)',
-        }}>
-          <Search size={14} color="var(--color-text-faint)" style={{ flexShrink: 0 }} />
+          transition: "border-color 0.15s ease",
+        }}
+          onFocusCapture={(e) => (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--color-primary)'}
+          onBlurCapture={(e) => (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--color-border-strong)'}
+        >
+          <Search size={13} color="var(--color-text-faint)" style={{ flexShrink: 0 }} />
           <input
             id="wallet-address-input"
             type="text"
             value={inputAddr}
             onChange={(e) => setInputAddr(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleTrace()}
-            placeholder="Enter digital asset address for forensic trace (0x...)"
+            placeholder="Enter Ethereum wallet address (0x...)"
             style={{
               flex: 1,
               background: "none", border: "none", outline: "none",
               color: "var(--color-text)", fontFamily: "var(--font-mono)",
-              fontSize: "13px", minWidth: 0,
+              fontSize: "12px", minWidth: 0,
             }}
           />
           {inputAddr && (
             <button onClick={() => setInputAddr("")} style={{
               background: "none", border: "none", cursor: "pointer",
               color: "var(--color-text-faint)", padding: 0, lineHeight: 1,
-              fontSize: "12px", flexShrink: 0,
-            }}>✕</button>
+              flexShrink: 0, display: 'flex',
+            }}><X size={12} /></button>
           )}
         </div>
-      </div>
 
-      {/* Row 2.5: Deep Filter Settings */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: "0.5rem",
-        padding: "0.5rem 1rem",
-        borderBottom: "1px solid var(--color-border)",
-        background: "var(--color-surface-2)",
-        overflow: "hidden", minWidth: 0,
-        flexWrap: "wrap"
-      }}>
+        {/* Filter toggle */}
+        <button
+          onClick={() => setShowFilters((v) => !v)}
+          className="btn btn-ghost"
+          style={{ flexShrink: 0, padding: "0.375rem 0.625rem", fontSize: "11px", gap: '0.25rem' }}
+          aria-expanded={showFilters}
+        >
+          Filters <ChevronDown size={11} style={{ transition: 'transform 0.15s', transform: showFilters ? 'rotate(180deg)' : 'none' }} />
+        </button>
 
-        {/* Flow selector */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: "0.375rem",
-          background: "var(--color-surface-1)",
-          border: "1px solid var(--color-border)",
-          borderRadius: "0.375rem",
-          padding: "0.45rem 0.75rem",
-          flexShrink: 0,
-        }}>
-          <span className="label-sm" style={{ color: "var(--color-text-faint)" }}>FLOW</span>
-          <select id="flow-dir-select" value={useStore((s) => s.graphDirection)}
-            onChange={(e) => useStore.getState().setGraphDirection(e.target.value as any)}
-            style={{
-              background: "none", border: "none", outline: "none",
-              color: "var(--color-primary)", fontWeight: 700, fontFamily: "var(--font-sans)", fontSize: "12px", cursor: "pointer"
-            }}>
-            <option value="OUTBOUND">OUTBOUND ONLY</option>
-            <option value="INBOUND">INBOUND ONLY</option>
-            <option value="ALL">ALL CONNECTIONS</option>
-          </select>
-        </div>
-
-        {/* Asset selector */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: "0.375rem",
-          background: "var(--color-surface-1)",
-          border: "1px solid var(--color-border)",
-          borderRadius: "0.375rem",
-          padding: "0.45rem 0.75rem",
-          flexShrink: 0,
-        }}>
-          <span className="label-sm" style={{ color: "var(--color-text-faint)" }}>ASSET</span>
-          <select id="asset-type-select" value={useStore((s) => s.graphAssetFilter)}
-            onChange={(e) => useStore.getState().setGraphAssetFilter(e.target.value as any)}
-            style={{
-              background: "none", border: "none", outline: "none",
-              color: "var(--color-primary)", fontWeight: 700, fontFamily: "var(--font-sans)", fontSize: "12px", cursor: "pointer"
-            }}>
-            <option value="ALL">ALL (ETH & ERC20)</option>
-            <option value="ETH">NATIVE ETH ONLY</option>
-            <option value="TOKEN">ERC20 TOKENS ONLY</option>
-          </select>
-        </div>
-
-        {/* Hops selector */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: "0.375rem",
-          background: "var(--color-surface-1)",
-          border: "1px solid var(--color-border)",
-          borderRadius: "0.375rem",
-          padding: "0.45rem 0.75rem",
-          flexShrink: 0,
-        }}>
-          <span className="label-sm" style={{ color: "var(--color-text-faint)" }}>DEPTH</span>
-          <select id="hop-count-select" value={inputHops}
-            onChange={(e) => setInputHops(Number(e.target.value))}
-            style={{
-              background: "none", border: "none", outline: "none",
-              color: "var(--color-primary)", fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: "14px", cursor: "pointer"
-            }}>
-            {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </div>
-
-        {/* Spread selector */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: "0.375rem",
-          background: "var(--color-surface-1)",
-          border: "1px solid var(--color-border)",
-          borderRadius: "0.375rem",
-          padding: "0.45rem 0.75rem",
-          flexShrink: 0,
-        }}>
-          <span className="label-sm" style={{ color: "var(--color-text-faint)" }}>SPREAD</span>
-          <select id="limit-count-select" value={inputLimit}
-            onChange={(e) => setInputLimit(Number(e.target.value))}
-            style={{
-              background: "none", border: "none", outline: "none",
-              color: "var(--color-primary)", fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: "12px", cursor: "pointer"
-            }}>
-            <option value={100}>100 (FAST)</option>
-            <option value={500}>500 (DEEP)</option>
-            <option value={2000}>2000 (MASSIVE)</option>
-            <option value={10000}>10000 (MAX)</option>
-          </select>
-        </div>
-
-        {/* Time Slice selector */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: "0.375rem",
-          background: "var(--color-surface-1)",
-          border: "1px solid var(--color-border)",
-          borderRadius: "0.375rem",
-          padding: "0.35rem 0.75rem",
-          flexShrink: 0,
-        }}>
-          <span className="label-sm" style={{ color: "var(--color-text-faint)" }}>START TIME</span>
-          <input
-            type="datetime-local"
-            value={inputEpochDate}
-            onChange={(e) => setInputEpochDate(e.target.value)}
-            style={{
-              background: "none", border: "none", outline: "none",
-              color: "var(--color-primary)", fontWeight: 600, fontFamily: "var(--font-sans)", fontSize: "11px", cursor: "pointer"
-            }}
-          />
-        </div>
-
-        {/* Trace button */}
-        <button id="trace-wallet-btn" className="btn btn-primary" onClick={handleTrace}
+        {/* Analyze button */}
+        <button
+          id="trace-wallet-btn"
+          className="btn btn-primary"
+          onClick={handleTrace}
           disabled={traceLoading || !inputAddr.trim()}
-          style={{ flexShrink: 0, padding: "0.5rem 1.5rem", fontSize: "12px", background: 'var(--color-accent)', borderColor: 'var(--color-accent)' }}>
-          {traceLoading ? "TRACING..." : "INITIATE TRACE"}
+          style={{ flexShrink: 0, padding: "0.4rem 1rem", fontSize: "12px" }}
+        >
+          {traceLoading ? (
+            <><Loader2 size={12} className="spin" /> Analyzing…</>
+          ) : "Analyze"}
         </button>
       </div>
 
-      {/* Row 3: Trace stats */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: "0.75rem",
-        padding: "0.375rem 1rem",
-        background: "var(--color-surface-2)",
-        minHeight: "32px", overflow: "hidden", minWidth: 0,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
-          <span className="label-sm" style={{ color: "var(--color-text-faint)" }}>TARGET NODE:</span>
-          {traceResult ? (
-            <span className="code-terminal" style={{ color: "var(--color-primary)" }}>
-              {traceResult.rootAddress.slice(0, 10)}...{traceResult.rootAddress.slice(-5)}
-            </span>
-          ) : (
-            <span className="code-terminal" style={{ color: "var(--color-text-faint)" }}>—</span>
-          )}
+      {/* Row 2.5: Collapsible filter bar */}
+      {showFilters && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: "0.5rem",
+          padding: "0.4rem 0.875rem",
+          borderBottom: "1px solid var(--color-border)",
+          background: "var(--color-surface-2)",
+          flexWrap: "wrap",
+        }}>
+          {/* Flow selector */}
+          <FilterChip label="Flow">
+            <select id="flow-dir-select" value={useStore((s) => s.graphDirection)}
+              onChange={(e) => useStore.getState().setGraphDirection(e.target.value as any)}
+              style={selectStyle}>
+              <option value="ALL">All</option>
+              <option value="OUTBOUND">Outbound</option>
+              <option value="INBOUND">Inbound</option>
+            </select>
+          </FilterChip>
+
+          {/* Asset selector */}
+          <FilterChip label="Asset">
+            <select id="asset-type-select" value={useStore((s) => s.graphAssetFilter)}
+              onChange={(e) => useStore.getState().setGraphAssetFilter(e.target.value as any)}
+              style={selectStyle}>
+              <option value="ALL">All (ETH & ERC-20)</option>
+              <option value="ETH">Native ETH</option>
+              <option value="TOKEN">ERC-20 only</option>
+            </select>
+          </FilterChip>
+
+          {/* Hops selector */}
+          <FilterChip label="Depth">
+            <select id="hop-count-select" value={inputHops}
+              onChange={(e) => setInputHops(Number(e.target.value))}
+              style={selectStyle}>
+              {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} hop{n > 1 ? 's' : ''}</option>)}
+            </select>
+          </FilterChip>
+
+          {/* Spread selector */}
+          <FilterChip label="Limit">
+            <select id="limit-count-select" value={inputLimit}
+              onChange={(e) => setInputLimit(Number(e.target.value))}
+              style={selectStyle}>
+              <option value={100}>100 (fast)</option>
+              <option value={500}>500 (deep)</option>
+              <option value={2000}>2000</option>
+              <option value={10000}>10000</option>
+            </select>
+          </FilterChip>
+
+          {/* Time filter */}
+          <FilterChip label="From">
+            <input
+              type="datetime-local"
+              value={inputEpochDate}
+              onChange={(e) => setInputEpochDate(e.target.value)}
+              style={{ ...selectStyle, cursor: 'pointer' }}
+            />
+          </FilterChip>
         </div>
+      )}
 
-        {traceResult ? (
+      {/* Row 3: Trace stats / error strip */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: "1rem",
+        padding: "0.3rem 0.875rem",
+        background: "var(--color-surface-2)",
+        minHeight: "28px", overflow: "hidden", minWidth: 0,
+        borderBottom: "1px solid var(--color-border)",
+      }}>
+        {traceError ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', color: 'var(--color-danger)', flex: 1, minWidth: 0 }}>
+            <AlertCircle size={11} style={{ flexShrink: 0 }} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {traceError}
+            </span>
+          </div>
+        ) : traceResult ? (
           <>
-
+            <span className="label-sm" style={{ color: "var(--color-text-faint)", flexShrink: 0 }}>Wallet:</span>
+            <span className="code-terminal" style={{ color: "var(--color-primary)", fontSize: '11px', flexShrink: 0 }}>
+              {traceResult.rootAddress.slice(0, 10)}…{traceResult.rootAddress.slice(-6)}
+            </span>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "1.25rem", flexShrink: 0 }}>
-              <StatChip label="STRUCTURAL DEPTH" value={`${traceResult.hops} HOPS`} />
-              <StatChip label="EXTRACTED NODES" value={`${traceResult.nodes.length.toLocaleString()}`} />
-              <StatChip label="ROUTING EDGES" value={`${traceResult.edges.length.toLocaleString()}`} />
+              <StatChip label="Nodes"   value={traceResult.nodes.length.toLocaleString()} />
+              <StatChip label="Edges"   value={traceResult.edges.length.toLocaleString()} />
+              <StatChip label="Risk"    value={`${riskScore}/100`} color={riskColor} />
             </div>
           </>
         ) : (
-          <span className="code-terminal" style={{ color: "var(--color-text-faint)" }}>
-            {traceLoading ? "ANALYSIS IN PROGRESS..." : "AWAITING WALLET INPUT FOR HEURISTIC & ML TRACING"}
+          <span className="code-terminal" style={{ color: "var(--color-text-faint)", fontSize: '11px' }}>
+            {traceLoading ? "Fetching transactions from Etherscan and Neo4j…" : "Enter a wallet address above to begin analysis"}
           </span>
         )}
       </div>
-
     </div>
   );
 }
 
-function StatusPill({ icon, label, value, ok }: { icon: React.ReactNode; label: string; value: string; ok?: boolean }) {
+function FilterChip({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: "0.375rem",
-      padding: "0.15rem 0.5rem",
       background: "var(--color-surface-1)",
-      border: "1px solid var(--color-border)", borderRadius: "4px",
+      border: "1px solid var(--color-border-strong)",
+      borderRadius: "var(--radius-sm)",
+      padding: "0.275rem 0.625rem",
       flexShrink: 0,
     }}>
-      <span style={{ color: ok ? "var(--color-india-green)" : "var(--color-secondary)" }}>{icon}</span>
       <span className="label-sm" style={{ color: "var(--color-text-faint)" }}>{label}</span>
-      <span className={`status-dot ${ok ? "status-dot-active" : "status-dot-error"}`} style={{
-        background: ok ? 'var(--color-india-green)' : 'var(--color-secondary)',
-        animation: ok ? 'pulse-green 2s infinite' : 'pulse-red 2s infinite'
-      }} />
-      <span className="label-sm" style={{ color: ok ? "var(--color-india-green)" : "var(--color-secondary-dim)" }}>{value}</span>
+      {children}
     </div>
   );
 }
 
-function StatChip({ label, value }: { label: string; value: string }) {
+const selectStyle: React.CSSProperties = {
+  background: "none", border: "none", outline: "none",
+  color: "var(--color-text)", fontWeight: 500,
+  fontFamily: "var(--font-sans)", fontSize: "11px", cursor: "pointer",
+};
+
+function StatChip({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
       <span className="label-sm" style={{ color: "var(--color-text-faint)" }}>{label}</span>
-      <span className="code-terminal" style={{ color: "var(--color-primary)", fontWeight: 700, fontSize: "12px" }}>{value}</span>
+      <span className="code-terminal" style={{ color: color ?? "var(--color-text)", fontWeight: 700, fontSize: "11px" }}>{value}</span>
     </div>
   );
 }

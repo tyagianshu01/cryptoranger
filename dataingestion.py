@@ -3,10 +3,10 @@ from config import ETHERSCAN_API_KEY
 
 
 def _call_etherscan(address, action, offset=100):
-    """Internal helper that hits a single Etherscan endpoint."""
+    """Fetch one account action from Etherscan API V2."""
     url = "https://api.etherscan.io/v2/api"
     params = {
-        "chainid": 1,
+        "chainid": 1,  # Ethereum mainnet
         "module": "account",
         "action": action,
         "address": address,
@@ -15,30 +15,45 @@ def _call_etherscan(address, action, offset=100):
         "page": 1,
         "offset": offset,
         "sort": "desc",
-        "apikey": ETHERSCAN_API_KEY
+        "apikey": ETHERSCAN_API_KEY,
     }
+
     try:
-        response = requests.get(url, params=params, timeout=10)
-    except Exception as e:
-        print(f"Etherscan Network Error: {e}")
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as e:
+        print(f"Etherscan network error: {e}")
         return []
-    
-    if response.status_code != 200:
-        print(f"Etherscan HTTP Error: {response.status_code} - {response.text}")
+    except ValueError as e:
+        print(f"Etherscan returned invalid JSON: {e}")
         return []
-    data = response.json()
-    if data.get("status") != "1":
-        print(f"Etherscan API Error (Address: {address}): {data.get('message')} - {data.get('result')}")
+
+    if data.get("status") == "1":
+        result = data.get("result", [])
+        return result if isinstance(result, list) else []
+
+    # Etherscan reports an empty transaction list as status 0.
+    message = str(data.get("result", data.get("message", "")))
+    if "no transactions found" in message.lower():
         return []
-    return data["result"]
+
+    print(
+        f"Etherscan API error for {address}: "
+        f"{data.get('message')} - {data.get('result')}"
+    )
+    return []
 
 
 def fetch_transactions(address, limit=100):
-    """Fetches both Normal and ERC20 token transactions for a wallet."""
-    print(f"Fetching Normal + ERC20 data from Etherscan for: {address}")
+    """Fetch normal Ethereum and ERC-20 transactions for a wallet."""
+    print(f"Fetching normal + ERC-20 data from Etherscan for: {address}")
 
     normal_txs = _call_etherscan(address, "txlist", offset=limit)
     erc20_txs = _call_etherscan(address, "tokentx", offset=limit)
 
-    print(f"  Retrieved {len(normal_txs)} normal and {len(erc20_txs)} ERC20 transactions.")
+    print(
+        f"  Retrieved {len(normal_txs)} normal and "
+        f"{len(erc20_txs)} ERC-20 transactions."
+    )
     return {"normal": normal_txs, "erc20": erc20_txs}
