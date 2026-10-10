@@ -100,6 +100,7 @@ export interface TraceResult {
   caseId: string;
   chainOfCustodyHash: string;
   ledgerTransactions: any[];
+  chain?: 'ETH' | 'SOL';
 }
 
 // ForceGraph node/link shapes (extend from WalletNode / TxEdge)

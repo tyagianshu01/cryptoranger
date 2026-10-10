@@ -81,7 +81,7 @@ def detect_next_suspicious_wallets(G, current_wallet, chain="ETH"):
     num_branches = len(valid_edges)
 
     for _, receiver, data in valid_edges:
-        rec_lower=rec_lower.strip() if is_sol else receiver.lower().strip()
+        rec_lower=receiver.strip() if is_sol else receiver.lower().strip()
         if is_sol and rec_lower in excluded:
             continue
         if not is_sol and get_label_type(rec_lower) in {"vasp", "mixer", "bridge"}:

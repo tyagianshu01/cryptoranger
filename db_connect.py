@@ -101,64 +101,6 @@ def store_in_neo4j(driver, data):
 
     print(f"Saved {len(batch_normal)} normal + {len(batch_erc20)} ERC20 transactions to Neo4j.")
 
-
-def store_solana_transfers(driver, transfers):
-    """
-    Inserts extracted Solana point-to-point transfers into Neo4j using the Solana schema.
-    Uses idempotent MERGE to prevent duplicate relationships on repeated traces.
-    """
-    if not transfers:
-        return
-
-    valid_transfers = []
-    for t in transfers:
-        if not isinstance(t, dict):
-            continue
-        src = t.get("source")
-        dst = t.get("destination")
-        amt = t.get("amount")
-        if src and dst and str(src).strip() and str(dst).strip() and amt is not None and float(amt) > 0:
-            valid_transfers.append({
-                "source": str(src).strip(),
-                "destination": str(dst).strip(),
-                "amount": float(amt),
-                "token": str(t.get("token") or "SOL"),
-                "signature": str(t.get("signature") or ""),
-                "block_time": int(t.get("block_time") or 0),
-                "idx": int(t.get("idx") or 0)
-            })
-
-    if not valid_transfers:
-        return
-
-    cypher_query = """
-    UNWIND $transfers AS tx
-    
-    // 1. Create or Match the Sender Node
-    MERGE (sender:Account {address: tx.source})
-    
-    // 2. Create or Match the Receiver Node
-    MERGE (receiver:Account {address: tx.destination})
-    
-    // 3. Create or Match the Transfer Edge idempotently
-    MERGE (sender)-[r:TRANSFERRED {
-        signature: tx.signature,
-        token: tx.token,
-        idx: tx.idx
-    }]->(receiver)
-    ON CREATE SET
-        r.amount = tx.amount,
-        r.timestamp = tx.block_time
-    ON MATCH SET
-        r.amount = tx.amount,
-        r.timestamp = tx.block_time
-    """
-
-    with driver.session() as session:
-        session.run(cypher_query, transfers=valid_transfers)
-    print(f"Successfully inserted {len(valid_transfers)} Solana transfers into Neo4j.")
-
-
 def get_networkx_from_neo4j(driver):
     """Pulls the current state of the Neo4j database into a NetworkX DiGraph (supports ETH & Solana)."""
     query_eth = """

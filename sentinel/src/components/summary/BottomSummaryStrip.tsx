@@ -14,7 +14,7 @@ export function BottomSummaryStrip() {
       icon: <TrendingUp size={13} color="var(--color-primary)" />,
       label: 'Total volume traced',
       value: `$${result.totalValueUsd.toLocaleString()} USD`,
-      sub: `${result.totalValueTraced.toFixed(3)} ETH`,
+      sub: `${result.totalValueTraced.toFixed(3)} ${result.chain || (result.rootAddress.startsWith('0x') ? 'ETH' : 'SOL')}`,
       color: 'var(--color-primary)',
     },
     {

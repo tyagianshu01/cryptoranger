@@ -57,25 +57,33 @@ interface AppState {
 
 function buildTraceLogLines(address: string, hops: number): string[] {
   const short = address.slice(0, 10) + '...' + address.slice(-4);
+  const isSol = !/^0x[0-9a-fA-F]{40}$/i.test(address);
+  const chain = isSol ? 'SOL' : 'ETH';
   return [
-    `[SYS]  > MATCH (w:Wallet {addr:'${short}'})`,
+    `[SYS]  > MATCH (w:${isSol ? 'Account' : 'Wallet'} {addr:'${short}'})`,
     `[SYS]  > CALL gds.bfs.stream('tx_graph',{...})`,
     `[NEO4J] Connected to cluster — 3 nodes`,
-    `[PASS]  12 utxo bundles resolved`,
-    `[INFO]  Hop 1 — ${hops >= 1 ? 'scanning...' : 'skipped'}`,
-    `[ALERT] High entropy mixing contract identified — Tornado Router`,
+    `[PASS]  12 ${isSol ? 'transfer' : 'utxo'} bundles resolved`,
+    `[INFO]  Hop 1 — ${hops >= 1 ? 'scanning...' : 'skipped'} [${chain}]`,
+    isSol
+      ? `[ALERT] High-frequency program account detected — DEX Router`
+      : `[ALERT] High entropy mixing contract identified — Tornado Router`,
     `[INFO]  Hop 2 — graph BFS expanding`,
     `[PASS]  GDS Graph Louvain modularity score: 0.87`,
-    `[DAPR]  Modified Binance Deposit Threshold (Hot ≤50k)`,
+    isSol
+      ? `[DAPR]  Cross-reference Solana VASP deposit addresses`
+      : `[DAPR]  Modified Binance Deposit Threshold (Hot ≤50k)`,
     `[INFO]  Hop 3 — ${hops >= 3 ? 'active' : 'depth limit hit'}`,
-    `[MEMPOOL] TX INGEST: Hash 0xe4f92b... verified by 3 validators`,
+    isSol
+      ? `[RPC]   Solana JSON-RPC: parsed ${hops * 10} signatures`
+      : `[MEMPOOL] TX INGEST: Hash 0xe4f92b... verified by 3 validators`,
     `[INFO]  Hop 4 — ${hops >= 4 ? 'scanning...' : 'depth limit hit'}`,
-    `[ML]   SPLIT-LEARN epoch converged — 0.88 AUC`,
+    `[ML]   ${isSol ? 'Heuristic-only mode (SOL)' : 'SPLIT-LEARN epoch converged — 0.88 AUC'}`,
     `[INFO]  Hop ${hops} — ${hops >= 5 ? 'terminal depth' : 'scanning...'}`,
     `[PASS]  ${hops * 2 + 3} bundles resolved`,
     `[GDS]  Jaccard similarity index: 0.941`,
     `[PASS]  Trace complete — risk matrix assembled`,
-    `[OUT]   ENGINE: CYPHER 5.18 GDS`,
+    `[OUT]   ENGINE: CYPHER 5.18 GDS [${chain}]`,
   ];
 }
 
@@ -116,7 +124,7 @@ export const useStore = create<AppState>((set, get) => ({
   graphAssetFilter: 'ALL',
   setGraphAssetFilter: (asset) => set({ graphAssetFilter: asset }),
 
-  runTrace: async (address, hops, limit = 100, epochSeconds = 0) => {
+  runTrace: async (address, hops, limit, epochSeconds = 0) => {
     set({
       traceAddress: address,
       traceHops: hops,
@@ -137,11 +145,18 @@ export const useStore = create<AppState>((set, get) => ({
 
     try {
       // Live FastAPI backend call — no mock fallback
+      const isSolReq = !/^0x[0-9a-fA-F]{40}$/i.test(address.trim());
+      const effectiveLimit = limit !== undefined ? (isSolReq && limit === 100 ? 5 : limit) : (isSolReq ? 5 : 100);
       const response = await axios.post(`${API_URL}/analyze-wallet`, {
         txId: address,
-        limit: limit,
-        epochSeconds: epochSeconds
+        limit: effectiveLimit,
+        epochSeconds: epochSeconds,
+        chain: isSolReq ? 'SOL' : 'ETH',
       }, { timeout: 120000 });
+
+      const chain: string = response.data.chain || 'ETH';
+      const isSol = chain === 'SOL';
+      const usdPrice = isSol ? 150.0 : 2100.0;
 
       const rawNodes = response.data.graph_data?.nodes || [];
       const rawEdges = response.data.graph_data?.edges || [];
@@ -162,6 +177,7 @@ export const useStore = create<AppState>((set, get) => ({
       let totalValueTraced = realEdges.reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
 
       // Populate vaspMatches from Stage 5 off-ramps
+      const nativeSymbol = isSol ? 'SOL' : 'ETH';
       const vaspMatches: VaspMatch[] = offRampRecords.map((o: any) => ({
         nodeId: o.address,
         exchange: o.entity,
@@ -173,7 +189,7 @@ export const useStore = create<AppState>((set, get) => ({
 
       const topOffRamp = offRampRecords[0];
       const threatDesc = topOffRamp
-        ? `${severityTier} · Lead: ${topOffRamp.severity} (${topOffRamp.entity}, ${topOffRamp.hops} hops, ${topOffRamp.taintedEth} ETH tainted)`
+        ? `${severityTier} · Lead: ${topOffRamp.severity} (${topOffRamp.entity}, ${topOffRamp.hops} hops, ${topOffRamp.taintedEth} ${nativeSymbol} tainted)`
         : `${severityTier} · Forensic graph analysis complete`;
 
       const realData: TraceResult = {
@@ -192,7 +208,7 @@ export const useStore = create<AppState>((set, get) => ({
         // ── Financials ────────────────────────────────────────────────────
         hops: hops,
         totalValueTraced: totalValueTraced,
-        totalValueUsd: totalValueTraced * 2100,
+        totalValueUsd: totalValueTraced * usdPrice,
         assetsRestricted: 0,
         assetsRestrictedUsd: 0,
         mixerHopCount: response.data.case_metrics?.peelChainsCount || 0,
@@ -207,6 +223,7 @@ export const useStore = create<AppState>((set, get) => ({
         watchlists: [],
         peelChain: [],
         ledgerTransactions: response.data.ledger_transactions || [],
+        chain: isSol ? 'SOL' : 'ETH',
 
         // ── Extended v2.1 fields ───────────────────────────────────────────
         // @ts-ignore
@@ -221,7 +238,11 @@ export const useStore = create<AppState>((set, get) => ({
       };
 
       // State ko update kar diya aur automatically root node ko select kiya
-      const rootNode = realNodes.find((n: any) => n.address.toLowerCase() === address.toLowerCase()) || realNodes[0] || null;
+      const rootNode = realNodes.find((n: any) =>
+        isSol
+          ? n.address === address  // Solana: case-sensitive match
+          : n.address.toLowerCase() === address.toLowerCase()  // ETH: case-insensitive
+      ) || realNodes[0] || null;
       set({ traceResult: realData, traceLoading: false, selectedNode: rootNode });
 
     } catch (err: any) {

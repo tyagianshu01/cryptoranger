@@ -15,7 +15,8 @@ export function HomePage() {
   const [walletInput, setWalletInput] = React.useState('');
 
   const handleAnalyze = () => {
-    if (walletInput.trim()) runTrace(walletInput.trim(), 5, 100, 0);
+    const isSol = !/^0x[0-9a-fA-F]{40}$/i.test(walletInput.trim());
+    if (walletInput.trim()) runTrace(walletInput.trim(), 5, isSol ? 5 : 100, 0);
   };
 
   const riskScore = traceResult?.riskScore ?? 0;
@@ -41,7 +42,7 @@ export function HomePage() {
           }}>
             <Activity size={10} color="var(--color-primary)" />
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-primary)', letterSpacing: '0.05em' }}>
-              On-chain analytics · Ethereum mainnet
+              On-chain analytics · Ethereum & Solana
             </span>
           </div>
 
@@ -80,7 +81,7 @@ export function HomePage() {
                 value={walletInput}
                 onChange={(e) => setWalletInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
-                placeholder="0x... Ethereum wallet address"
+                placeholder="Wallet address (0x... or Solana)"
                 style={{
                   flex: 1, background: 'none', border: 'none', outline: 'none',
                   color: 'var(--color-text)', fontFamily: 'var(--font-mono)', fontSize: '12px',
@@ -129,7 +130,7 @@ export function HomePage() {
           {[
             { label: 'Wallets found',    value: traceResult.nodes.length.toLocaleString(),               icon: <Database size={14} /> },
             { label: 'Transactions',     value: traceResult.edges.length.toLocaleString(),               icon: <Activity size={14} /> },
-            { label: 'Total volume',     value: `${traceResult.totalValueTraced.toFixed(3)} ETH`,        icon: <TrendingUp size={14} /> },
+            { label: 'Total volume',     value: `${traceResult.totalValueTraced.toFixed(3)} ${traceResult.chain || (traceResult.rootAddress.startsWith('0x') ? 'ETH' : 'SOL')}`,        icon: <TrendingUp size={14} /> },
             { label: 'Risk score',       value: `${riskScore}/100`,                                       icon: <ShieldAlert size={14} />, color: riskColor },
             { label: 'Risk level',       value: riskLabel,                                                icon: <BarChart3 size={14} />,  color: riskColor },
             { label: 'VASP offramps',    value: traceResult.vaspMatches.length.toLocaleString(),         icon: <Network size={14} /> },

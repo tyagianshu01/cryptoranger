@@ -32,7 +32,7 @@ from normalize import (
     is_dust,
     wei_to_eth,
 )
-from routers import analysis, chat, cypher, graphrag
+from routers import analysis, chat, cypher, graphrag_router
 from graphrag import GraphRAGService
 from scoring.offramp import evaluate_off_ramp_leads
 from scoring.patterns import compute_pattern_evidence, detect_peel_chains
@@ -43,7 +43,7 @@ app = FastAPI(title="CryptoTracker Sentinel — Forensic Tracing API (v2.1)")
 app.include_router(analysis.router)
 app.include_router(cypher.router)
 app.include_router(chat.router)
-app.include_router(graphrag.router)
+app.include_router(graphrag_router.router)
 
 @app.on_event("startup")
 async def startup_event():
@@ -63,13 +63,15 @@ URI = NEO4J_URI
 AUTH = (NEO4J_USER, NEO4J_PASSWORD)
 
 _ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_SOL_ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
 class AnalyzeRequest(BaseModel):
     txId: str
-    limit: int = 100
+    limit: Optional[int] = None  # None or 100 defaults to 5 for SOL, 100 for ETH
     epochSeconds: int = 0
     reported_role: Literal["suspect", "victim"] = "suspect"
+    chain: Optional[str] = None  # "ETH", "SOL", or None for auto-detect
 
 
 @app.get("/")
@@ -79,38 +81,67 @@ def home():
 
 @app.post("/analyze-wallet")
 def analyze_wallet(req: AnalyzeRequest):
-    wallet_id = req.txId.strip().lower()
+    raw_addr = req.txId.strip()
 
-    # Reject non-address inputs
-    if not _ETH_ADDR_RE.match(wallet_id):
+    # Auto-detect chain from address format if not explicitly provided
+    if req.chain:
+        chain = req.chain.upper()
+    elif _ETH_ADDR_RE.match(raw_addr.lower()):
+        chain = "ETH"
+    elif _SOL_ADDR_RE.match(raw_addr):
+        chain = "SOL"
+    else:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Invalid Ethereum wallet address: '{req.txId}'. "
-                "Expected format: 0x followed by exactly 40 hex characters. "
-                "Transaction hashes (66 characters) are not wallet addresses."
+                f"Unrecognized address format: '{req.txId}'. "
+                "Expected an Ethereum address (0x + 40 hex chars) "
+                "or a Solana address (32-44 Base58 chars)."
             ),
         )
+
+    is_sol = chain == "SOL"
+    # Solana Base58 addresses are case-sensitive — NEVER lowercase them
+    wallet_id = raw_addr if is_sol else raw_addr.lower()
+
+    # Solana public RPC aggressively rate-limits with HTTP 429 when fetching 100 transactions.
+    # Default to 5 if req.limit was unspecified or left at default 100.
+    if req.limit is None:
+        limit_to_use = 5 if is_sol else 100
+    elif is_sol and req.limit == 100:
+        limit_to_use = 5
+    else:
+        limit_to_use = req.limit
 
     # ==============================================================
     # 1. FETCH DATA + CONTINUOUS BFS TRACE (both ETH and SOL)
     # ==============================================================
     ml_evaluations: Dict[str, Dict[str, Any]] = {}
     if wallet_id != "unknown":
-        print(f"[+] API Triggered! (Limit: {req.limit} | Epoch: {req.epochSeconds} | Role: {req.reported_role}) Target: {wallet_id}")
-        ml_evaluations = trace_funds(wallet_id, max_depth=1, limit=req.limit)
+        print(f"[+] API Triggered! (Chain: {chain} | Limit: {limit_to_use} | Epoch: {req.epochSeconds} | Role: {req.reported_role}) Target: {wallet_id}")
+        ml_evaluations = trace_funds(wallet_id, max_depth=1, limit=limit_to_use, chain=chain)
 
     # ==============================================================
     # 2. IN-SCOPE NEIGHBOURHOOD (Ordered Query + Truncation Check)
     # ==============================================================
-    cypher_specific = """
-    MATCH (n:Wallet)-[:SENT|SENT_TOKEN]->(tx)-[:TO|TOKEN_TO]->(m:Wallet)
-    WHERE (toLower(n.address) = toLower($wallet_id) OR toLower(m.address) = toLower($wallet_id))
-          AND ($epoch = 0 OR tx.timestamp.epochSeconds >= $epoch)
-    RETURN n, tx AS rel, m
-    ORDER BY tx.timestamp.epochSeconds ASC
-    LIMIT 1001
-    """
+    # Chain-specific Cypher queries
+    if is_sol:
+        cypher_specific = """
+        MATCH (n:Account)-[r:TRANSFERRED]->(m:Account)
+        WHERE (n.address = $wallet_id OR m.address = $wallet_id)
+        RETURN n, r AS rel, m
+        ORDER BY r.timestamp ASC
+        LIMIT 1001
+        """
+    else:
+        cypher_specific = """
+        MATCH (n:Wallet)-[:SENT|SENT_TOKEN]->(tx)-[:TO|TOKEN_TO]->(m:Wallet)
+        WHERE (toLower(n.address) = toLower($wallet_id) OR toLower(m.address) = toLower($wallet_id))
+              AND ($epoch = 0 OR tx.timestamp.epochSeconds >= $epoch)
+        RETURN n, tx AS rel, m
+        ORDER BY tx.timestamp.epochSeconds ASC
+        LIMIT 1001
+        """
 
     raw_nodes: Dict[str, str] = {}
     raw_edges: List[Dict[str, Any]] = []
@@ -119,14 +150,22 @@ def analyze_wallet(req: AnalyzeRequest):
     def get_addr(node_obj):
         return node_obj.get("eth_address") or node_obj.get("address") or str(node_obj.element_id)
 
+    # USD price multiplier per chain
+    usd_price = 150.0 if is_sol else 2100.0
+
     try:
         with GraphDatabase.driver(URI, auth=AUTH) as driver:
             # Ensure root wallet has ML features evaluated even if tracer skipped it
-            if wallet_id not in ml_evaluations:
-                ml_evaluations[wallet_id] = evaluate_wallet_ml(driver, wallet_id, is_full_history=(req.limit >= 1000 and req.epochSeconds == 0))
+            # ML model is trained on ETH features only — skip for SOL
+            if not is_sol and wallet_id not in ml_evaluations:
+                ml_evaluations[wallet_id] = evaluate_wallet_ml(driver, wallet_id, is_full_history=(limit_to_use >= 1000 and req.epochSeconds == 0))
+
+            query_params = {"wallet_id": wallet_id}
+            if not is_sol:
+                query_params["epoch"] = req.epochSeconds
 
             records, _, _ = driver.execute_query(
-                cypher_specific, wallet_id=wallet_id, epoch=req.epochSeconds
+                cypher_specific, **query_params
             )
 
             # Explicit truncation check
@@ -139,43 +178,72 @@ def analyze_wallet(req: AnalyzeRequest):
                 m = record["m"]
                 rel = record["rel"]
 
-                n_addr = str(get_addr(n)).lower().strip()
-                m_addr = str(get_addr(m)).lower().strip()
+                # Solana addresses are case-sensitive; ETH are lowercased
+                if is_sol:
+                    n_addr = str(get_addr(n)).strip()
+                    m_addr = str(get_addr(m)).strip()
+                else:
+                    n_addr = str(get_addr(n)).lower().strip()
+                    m_addr = str(get_addr(m)).lower().strip()
 
                 raw_nodes[n_addr] = n_addr
                 raw_nodes[m_addr] = m_addr
 
-                # Stage 0: Separate native ETH vs ERC-20
-                symbol = str(rel.get("token_symbol") or "ETH").upper()
-                is_native_eth = symbol == "ETH"
+                if is_sol:
+                    # Solana: direct transfer edges carry amount, token, signature, timestamp
+                    token = str(rel.get("token") or "SOL").upper()
+                    amount_val = float(rel.get("amount") or 0.0)
+                    is_outbound = (n_addr == wallet_id)
+                    sig = str(rel.get("signature") or "")
+                    ts = rel.get("timestamp") or 0
 
-                if is_native_eth:
-                    val_eth = rel.get("value_eth")
-                    if val_eth is None:
-                        val_raw = rel.get("amount") or rel.get("value") or 0.0
-                        val_eth = wei_to_eth(val_raw)
-                    amount_val = float(val_eth)
+                    raw_edges.append({
+                        "id": f"{n_addr}->{m_addr}_{sig[:10]}",
+                        "source": n_addr,
+                        "target": m_addr,
+                        "label": f"{amount_val:.4f} {token}",
+                        "amount": amount_val,
+                        "amountUsd": amount_val * usd_price if token == "SOL" else 0.0,
+                        "txHash": sig,
+                        "timestamp": str(ts),
+                        "blockTimestamp": ts,
+                        "flowDirection": "outbound" if is_outbound else "inbound",
+                        "assetType": "sol" if token == "SOL" else "token",
+                        "symbol": token,
+                        "isDust": False,
+                    })
                 else:
-                    amount_val = float(rel.get("value_token") or rel.get("amount") or rel.get("value") or 0.0)
+                    # ETH: tripartite model — Wallet->Transaction->Wallet
+                    symbol = str(rel.get("token_symbol") or "ETH").upper()
+                    is_native_eth = symbol == "ETH"
 
-                is_outbound = (n_addr == wallet_id)
-                dust_flag = is_native_eth and is_dust(amount_val)
+                    if is_native_eth:
+                        val_eth = rel.get("value_eth")
+                        if val_eth is None:
+                            val_raw = rel.get("amount") or rel.get("value") or 0.0
+                            val_eth = wei_to_eth(val_raw)
+                        amount_val = float(val_eth)
+                    else:
+                        amount_val = float(rel.get("value_token") or rel.get("amount") or rel.get("value") or 0.0)
 
-                raw_edges.append({
-                    "id": f"{n_addr}->{m_addr}_{rel.get('hash', '')[:10]}",
-                    "source": n_addr,
-                    "target": m_addr,
-                    "label": f"{amount_val:.4f} {symbol}" if not dust_flag else f"{amount_val:.6f} {symbol} (dust)",
-                    "amount": amount_val,
-                    "amountUsd": amount_val * 2100 if is_native_eth else 0.0,
-                    "txHash": rel.get("hash", ""),
-                    "timestamp": str(rel.get("timestamp", "")),
-                    "blockTimestamp": rel.get("timestamp"),
-                    "flowDirection": "outbound" if is_outbound else "inbound",
-                    "assetType": "eth" if is_native_eth else "token",
-                    "symbol": symbol,
-                    "isDust": dust_flag,
-                })
+                    is_outbound = (n_addr == wallet_id)
+                    dust_flag = is_native_eth and is_dust(amount_val)
+
+                    raw_edges.append({
+                        "id": f"{n_addr}->{m_addr}_{rel.get('hash', '')[:10]}",
+                        "source": n_addr,
+                        "target": m_addr,
+                        "label": f"{amount_val:.4f} {symbol}" if not dust_flag else f"{amount_val:.6f} {symbol} (dust)",
+                        "amount": amount_val,
+                        "amountUsd": amount_val * usd_price if is_native_eth else 0.0,
+                        "txHash": rel.get("hash", ""),
+                        "timestamp": str(rel.get("timestamp", "")),
+                        "blockTimestamp": rel.get("timestamp"),
+                        "flowDirection": "outbound" if is_outbound else "inbound",
+                        "assetType": "eth" if is_native_eth else "token",
+                        "symbol": symbol,
+                        "isDust": dust_flag,
+                    })
 
     except Exception as e:
         print("Neo4j Error during wallet analysis:", e)
@@ -186,7 +254,8 @@ def analyze_wallet(req: AnalyzeRequest):
     # ==============================================================
     # 3. STAGE 0 & 2: TAINT PROPAGATION (Forward Haircut Model)
     # ==============================================================
-    outbound_from_root = [e for e in raw_edges if e["source"] == wallet_id and e["assetType"] == "eth"]
+    native_asset = "sol" if is_sol else "eth"
+    outbound_from_root = [e for e in raw_edges if e["source"] == wallet_id and e["assetType"] == native_asset]
     origin_set = get_origin_set(wallet_id, req.reported_role, outbound_from_root)
     victim_set = {wallet_id} if req.reported_role == "victim" else set()
 
@@ -219,7 +288,7 @@ def analyze_wallet(req: AnalyzeRequest):
     )
 
     for e in raw_edges:
-        if e["assetType"] == "eth" and not e["isDust"]:
+        if e["assetType"] in ("eth", "sol") and not e["isDust"]:
             amt = e["amount"]
             src = e["source"]
             tgt = e["target"]
@@ -306,13 +375,13 @@ def analyze_wallet(req: AnalyzeRequest):
             "type": node_class,
             "riskScore": r_score,
             "balance": abs(stats["balance"]),
-            "balanceUsd": abs(stats["balance"]) * (150.0 if is_sol else 2100.0),
+            "balanceUsd": abs(stats["balance"]) * usd_price,
             "firstSeen": datetime.utcnow().isoformat() + "Z",
             "lastActive": datetime.utcnow().isoformat() + "Z",
             "txCount": stats["txCount"],
             "hopDepth": 0 if is_root else 1,
             "flagged": flagged,
-            "chain": "ETH",
+            "chain": chain,
             "clusterIds": [],
             "mathMetrics": {
                 "p_ml": round(p_ml, 4),
@@ -383,7 +452,7 @@ def analyze_wallet(req: AnalyzeRequest):
             "target": tgt_addr,
             "type": "peel" if src_node and src_node.get("mathMetrics", {}).get("peel") == 1 else "normal",
             "amount": amt,
-            "amountUsd": e["amountUsd"],
+            "amountUsd": e.get("amountUsd", 0.0),
             "txHash": e["txHash"],
             "blockTimestamp": e["timestamp"],
             "flowDirection": e["flowDirection"],
@@ -429,6 +498,7 @@ def analyze_wallet(req: AnalyzeRequest):
         severity_tier = "LOW"
 
     return {
+        "chain": chain,
         "wallet_analyzed": wallet_id,
         "reported_role": req.reported_role,
         "overallRisk": overall_risk,

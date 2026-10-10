@@ -115,7 +115,7 @@ def evaluate_wallet_ml(driver, wallet_address: str, is_full_history: bool = True
         }
 
 
-def trace_funds(initial_victim, max_depth=1, limit=100, chain="ETH"):
+def trace_funds(initial_victim, max_depth=1, limit=None, chain="ETH"):
     """The main BFS loop that controls fetching, storing, and analyzing.
     
     Supports both Ethereum and Solana chains through the `chain` parameter.
@@ -130,13 +130,20 @@ def trace_funds(initial_victim, max_depth=1, limit=100, chain="ETH"):
 
     is_sol = chain.upper() == "SOL"
     
+    # Resolve effective limit per chain.
+    # Public Solana RPC aggressively rate-limits (HTTP 429) at 100 parsed transactions.
+    if limit is None:
+        limit = 5 if is_sol else 100
+    elif is_sol and limit == 100:
+        limit = 5
+
     # Solana base58 is case-sensitive — NEVER call .lower() on it
     root = initial_victim.strip() if is_sol else initial_victim.lower()
 
     queue = deque([(root, 0)])
     visited = set()
 
-    print(f"[START] Starting Automated Trace for: {initial_victim}")
+    print(f"[START] Starting Automated Trace for: {initial_victim} (Chain: {chain} | Limit: {limit})")
     ml_results: Dict[str, Dict[str, Any]] = {}
     vasp_set = set(SOLANA_KNOWN_VASPS.keys()) if is_sol else set(v.lower() for v in KNOWN_VASPS)
     # Check if history is truncated (hit limit)

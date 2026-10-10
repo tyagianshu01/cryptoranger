@@ -13,7 +13,7 @@ from normalize import (
     W_PEEL, W_FAST,
     PEEL_MIN_HOPS, PEEL_MAIN_MIN, PEEL_MAIN_MAX, PEEL_MIN_RECEIVERS, PEEL_WINDOW_SECONDS,
     FWD_WINDOW_SECONDS, FWD_MIN_FLOWS, FWD_MATCH_RATIO, FAST_FWD_SECONDS, VERY_FAST_FWD_SECONDS,
-    is_dust, get_label_type,
+    is_dust, get_label_type, normalize_address,
 )
 
 
@@ -39,24 +39,25 @@ def detect_peel_chains(
     """
     Detects chain-level peel chains (k >= 3 hops) satisfying the 70%-99.5% main-outflow band,
     at least 2 distinct receivers per hop, and within 72h window.
+    Supports both Ethereum and Solana native transfers.
 
     Returns:
         (peel_wallets, qualifying_chains)
     """
     if off_ramp_set is None:
         off_ramp_set = set()
-    off_ramp_set = {o.lower().strip() for o in off_ramp_set}
+    off_ramp_set = {normalize_address(o) for o in off_ramp_set}
 
-    # Only non-dust native ETH transfers
-    eth_txs = [
+    # Only non-dust native transfers (ETH or SOL)
+    native_txs = [
         t for t in transfers
-        if t.get("assetType", "eth") == "eth" and not is_dust(t.get("amount", 0.0))
+        if t.get("assetType", "eth") in ("eth", "sol") and not is_dust(t.get("amount", 0.0))
     ]
 
     # Map out-edges by sender
     out_by_node: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for t in eth_txs:
-        out_by_node[t["source"].lower().strip()].append(t)
+    for t in native_txs:
+        out_by_node[normalize_address(t["source"])].append(t)
 
     # For each node, check if it qualifies as a peel hop:
     # 1. Total outflow out_i
@@ -68,7 +69,7 @@ def detect_peel_chains(
         if get_label_type(node) != "none":
             continue
 
-        distinct_receivers = {t["target"].lower().strip() for t in tx_list}
+        distinct_receivers = {normalize_address(t["target"]) for t in tx_list}
         if len(distinct_receivers) < PEEL_MIN_RECEIVERS:
             continue
 
@@ -81,7 +82,7 @@ def detect_peel_chains(
         earliest_time_per_target: Dict[str, float] = {}
 
         for t in tx_list:
-            tgt = t["target"].lower().strip()
+            tgt = normalize_address(t["target"])
             amt = float(t.get("amount", 0.0))
             out_per_target[tgt] += amt
             ts = _parse_timestamp(t.get("blockTimestamp") or t.get("timestamp"))
@@ -149,18 +150,19 @@ def compute_forwarding_latency(
     For each non-dust inbound transfer r (amount a_r, time t_r),
     finds earliest outbound transfers within 24h whose cumulative amount reaches >= 0.9 a_r.
     L_med = median(L_r). Requires >= 2 matched flows.
+    Supports both Ethereum and Solana native transfers.
     """
-    eth_txs = [
+    native_txs = [
         t for t in transfers
-        if t.get("assetType", "eth") == "eth" and not is_dust(t.get("amount", 0.0))
+        if t.get("assetType", "eth") in ("eth", "sol") and not is_dust(t.get("amount", 0.0))
     ]
 
     in_by_node: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     out_by_node: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
-    for t in eth_txs:
-        src = t["source"].lower().strip()
-        tgt = t["target"].lower().strip()
+    for t in native_txs:
+        src = normalize_address(t["source"])
+        tgt = normalize_address(t["target"])
         in_by_node[tgt].append(t)
         out_by_node[src].append(t)
 
@@ -239,6 +241,7 @@ def compute_pattern_evidence(
     Computes composite pattern(v) for all wallets according to Section 3 Stage 3:
     pattern(v) = 1 - (1 - w_peel * peel(v)) * (1 - w_fast * fast(v))
     Returns {address: {"pattern": float, "peel": int, "fast": int, "very_fast": int, ...}}
+    Supports both Ethereum and Solana addresses.
     """
     peel_wallets, qualifying_chains = detect_peel_chains(transfers, off_ramp_set=off_ramp_set)
     fwd_info = compute_forwarding_latency(transfers)
@@ -246,24 +249,26 @@ def compute_pattern_evidence(
     evidence: Dict[str, Dict[str, Any]] = {}
 
     for w in wallets:
-        w_lower = w.lower().strip()
-        if get_label_type(w_lower) != "none":
-            evidence[w_lower] = {
+        w_norm = normalize_address(w)
+        if get_label_type(w_norm) != "none":
+            rec = {
                 "pattern": 0.0,
                 "peel": 0,
                 "fast": 0,
                 "very_fast": 0,
                 "peel_member": False,
             }
+            evidence[w] = rec
+            evidence[w_norm] = rec
             continue
 
-        peel_flag = 1 if w_lower in peel_wallets else 0
-        fwd_res = fwd_info.get(w_lower, {"fast": 0, "very_fast": 0})
+        peel_flag = 1 if (w_norm in peel_wallets or w in peel_wallets) else 0
+        fwd_res = fwd_info.get(w_norm, fwd_info.get(w, {"fast": 0, "very_fast": 0}))
         fast_flag = fwd_res.get("fast", 0)
 
         pattern_val = 1.0 - (1.0 - W_PEEL * peel_flag) * (1.0 - W_FAST * fast_flag)
 
-        evidence[w_lower] = {
+        rec = {
             "pattern": float(round(pattern_val, 4)),
             "peel": peel_flag,
             "fast": fast_flag,
@@ -271,5 +276,8 @@ def compute_pattern_evidence(
             "median_latency": fwd_res.get("median_latency_seconds"),
             "peel_member": peel_flag == 1,
         }
+        evidence[w] = rec
+        evidence[w_norm] = rec
 
     return evidence
+

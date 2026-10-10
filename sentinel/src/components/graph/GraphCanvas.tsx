@@ -124,15 +124,17 @@ export function GraphCanvas() {
     if (graphDirection === 'OUTBOUND') filteredEdges = filteredEdges.filter((e: any) => e.flowDirection !== 'inbound');
     else if (graphDirection === 'INBOUND') filteredEdges = filteredEdges.filter((e: any) => e.flowDirection === 'inbound');
 
-    if (graphAssetFilter === 'ETH') filteredEdges = filteredEdges.filter((e: any) => e.assetType === 'eth');
+    if (graphAssetFilter === 'ETH') filteredEdges = filteredEdges.filter((e: any) => e.assetType === 'eth' || e.assetType === 'sol');
     else if (graphAssetFilter === 'TOKEN') filteredEdges = filteredEdges.filter((e: any) => e.assetType === 'token');
 
+    const isSol = traceResult.chain === 'SOL' || !/^0x/i.test(traceResult.rootAddress);
+    const norm = (s: string) => isSol ? String(s) : String(s).toLowerCase();
     const activeNodes = new Set<string>();
-    activeNodes.add(traceResult.rootAddress.toLowerCase());
-    filteredEdges.forEach((e: any) => { activeNodes.add(e.source.toLowerCase()); activeNodes.add(e.target.toLowerCase()); });
+    activeNodes.add(norm(traceResult.rootAddress));
+    filteredEdges.forEach((e: any) => { activeNodes.add(norm(e.source)); activeNodes.add(norm(e.target)); });
 
     const nodes = rawNodes
-      .filter((n: any) => graphDirection === 'ALL' || activeNodes.has(n.id.toLowerCase()))
+      .filter((n: any) => graphDirection === 'ALL' || activeNodes.has(norm(n.id)))
       .map((n: any) => ({ ...n, id: String(n.id), label: n.data?.label || n.label || 'Unknown', type: n.type || 'intermediate' }));
 
     const nodeIds = new Set(nodes.map((n: any) => n.id));
@@ -142,6 +144,7 @@ export function GraphCanvas() {
 
     return { nodes, links };
   }, [traceResult, graphDirection, graphAssetFilter]);
+
 
   const handleNodeClick = useCallback((node: any) => selectNode(node as WalletNode), [selectNode]);
 
@@ -181,7 +184,8 @@ export function GraphCanvas() {
       const mx = (start.x + end.x) / 2;
       const my = (start.y + end.y) / 2;
       const fontSize = Math.max(3.5, 4.5 / globalScale);
-      const amountTxt = link.amount ? `${Number(link.amount).toFixed(2)} ETH` : 'Tx';
+      const sym = link.symbol || (traceResult?.chain === 'SOL' ? 'SOL' : 'ETH');
+      const amountTxt = link.amount ? `${Number(link.amount).toFixed(2)} ${sym}` : 'Tx';
       ctx.font = `500 ${fontSize}px "Inter", system-ui, sans-serif`;
       const textWidth = ctx.measureText(amountTxt).width;
 
@@ -302,7 +306,10 @@ export function GraphCanvas() {
         <div className="context-menu" style={{ left: contextMenu.x + 10, top: contextMenu.y + 10 }}>
           <div className="label-sm" style={{ padding: '0.375rem 0.875rem', color: 'var(--color-text-faint)' }}>{contextMenu.node.label}</div>
           <div className="context-menu-divider" />
-          <button className="context-menu-item" onClick={() => useStore.getState().runTrace(contextMenu.node.id, 1)}>Trace +1 hop</button>
+          <button className="context-menu-item" onClick={() => {
+            const isSol = !contextMenu.node.id.startsWith('0x');
+            useStore.getState().runTrace(contextMenu.node.id, 1, isSol ? 5 : 100);
+          }}>Trace +1 hop</button>
           <button className="context-menu-item">Check for peel chain</button>
           <button className="context-menu-item">Lookup known exchanges</button>
           <div className="context-menu-divider" />

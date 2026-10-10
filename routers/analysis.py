@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from config import KNOWN_VASPS, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
 from db_connect import get_db_driver, get_networkx_from_neo4j
-from normalize import DUST_ETH, get_label_info, is_dust, wei_to_eth
+from normalize import DUST_ETH, get_label_info, is_dust, wei_to_eth, normalize_address
 from scoring.offramp import evaluate_off_ramp_leads
 from scoring.patterns import compute_forwarding_latency, detect_peel_chains
 from scoring.taint import compute_forward_taint
@@ -45,50 +45,81 @@ class DossierRequest(BaseModel):
 # ── Shared helpers ───────────────────────────────────────────────────────────
 
 def _fetch_subgraph_transfers(address: str, max_hops: int = 5) -> List[Dict[str, Any]]:
-    """Fetches non-dust and token transfers up to max_hops from address."""
+    """Fetches non-dust and token transfers up to max_hops from address (ETH or Solana)."""
     from neo4j import GraphDatabase
-    cypher = """
-    MATCH (s:Wallet)-[:SENT|SENT_TOKEN]->(tx)-[:TO|TOKEN_TO]->(r:Wallet)
-    RETURN
-        s.address AS sender,
-        r.address AS receiver,
-        tx.value_eth AS value_eth,
-        tx.value_token AS value_token,
-        tx.amount AS amount,
-        tx.token_symbol AS token_symbol,
-        tx.hash AS hash,
-        toString(tx.timestamp) AS ts
-    LIMIT 2000
-    """
+    is_sol = not address.startswith("0x") and 32 <= len(address) <= 44
+
+    if is_sol:
+        cypher = """
+        MATCH (s:Account)-[r:TRANSFERRED]->(recv:Account)
+        RETURN
+            s.address AS sender,
+            recv.address AS receiver,
+            r.amount AS amount,
+            r.token AS token_symbol,
+            r.signature AS hash,
+            toString(r.timestamp) AS ts
+        LIMIT 2000
+        """
+    else:
+        cypher = """
+        MATCH (s:Wallet)-[:SENT|SENT_TOKEN]->(tx)-[:TO|TOKEN_TO]->(r:Wallet)
+        RETURN
+            s.address AS sender,
+            r.address AS receiver,
+            tx.value_eth AS value_eth,
+            tx.value_token AS value_token,
+            tx.amount AS amount,
+            tx.token_symbol AS token_symbol,
+            tx.hash AS hash,
+            toString(tx.timestamp) AS ts
+        LIMIT 2000
+        """
     rows: List[Dict[str, Any]] = []
     try:
         driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
         with driver.session() as session:
             result = session.run(cypher)
             for rec in result:
-                s_addr = str(rec["sender"] or "").lower().strip()
-                r_addr = str(rec["receiver"] or "").lower().strip()
-                symbol = str(rec["token_symbol"] or "ETH").upper()
-                is_eth = symbol == "ETH"
-
-                if is_eth:
-                    val_eth = rec["value_eth"]
-                    if val_eth is None:
-                        val_eth = wei_to_eth(rec["amount"] or 0)
-                    amt = float(val_eth)
+                if is_sol:
+                    s_addr = str(rec["sender"] or "").strip()
+                    r_addr = str(rec["receiver"] or "").strip()
+                    token = str(rec["token_symbol"] or "SOL").upper()
+                    amt = float(rec["amount"] or 0.0)
+                    rows.append({
+                        "source": s_addr,
+                        "target": r_addr,
+                        "amount": amt,
+                        "assetType": "sol" if token == "SOL" else "token",
+                        "symbol": token,
+                        "txHash": rec["hash"] or "",
+                        "timestamp": rec["ts"] or "",
+                        "blockTimestamp": rec["ts"] or "",
+                    })
                 else:
-                    amt = float(rec["value_token"] or rec["amount"] or 0.0)
+                    s_addr = str(rec["sender"] or "").lower().strip()
+                    r_addr = str(rec["receiver"] or "").lower().strip()
+                    symbol = str(rec["token_symbol"] or "ETH").upper()
+                    is_eth = symbol == "ETH"
 
-                rows.append({
-                    "source": s_addr,
-                    "target": r_addr,
-                    "amount": amt,
-                    "assetType": "eth" if is_eth else "token",
-                    "symbol": symbol,
-                    "txHash": rec["hash"] or "",
-                    "timestamp": rec["ts"] or "",
-                    "blockTimestamp": rec["ts"] or "",
-                })
+                    if is_eth:
+                        val_eth = rec["value_eth"]
+                        if val_eth is None:
+                            val_eth = wei_to_eth(rec["amount"] or 0)
+                        amt = float(val_eth)
+                    else:
+                        amt = float(rec["value_token"] or rec["amount"] or 0.0)
+
+                    rows.append({
+                        "source": s_addr,
+                        "target": r_addr,
+                        "amount": amt,
+                        "assetType": "eth" if is_eth else "token",
+                        "symbol": symbol,
+                        "txHash": rec["hash"] or "",
+                        "timestamp": rec["ts"] or "",
+                        "blockTimestamp": rec["ts"] or "",
+                    })
         driver.close()
     except Exception as e:
         print(f"[analysis] subgraph transfer query error: {e}")
@@ -101,9 +132,10 @@ def _fetch_subgraph_transfers(address: str, max_hops: int = 5) -> List[Dict[str,
 
 @router.post("/vasp-offramps")
 def vasp_offramps(req: WalletRequest):
-    address = req.address.strip().lower()
+    address = normalize_address(req.address)
     if not address:
         return {"offRamps": [], "vasps": [], "error": "No address provided"}
+
 
     transfers = _fetch_subgraph_transfers(address, max_hops=5)
     if not transfers:
@@ -147,13 +179,14 @@ def vasp_offramps(req: WalletRequest):
 
 @router.post("/peeling-heuristics")
 def peeling_heuristics(req: WalletRequest):
-    address = req.address.strip().lower()
+    address = normalize_address(req.address)
     if not address:
         return {"peel_flags": [], "velocity_flags": [], "peel_chains": [], "error": "No address provided"}
 
     transfers = _fetch_subgraph_transfers(address, max_hops=5)
     if not transfers:
         return {"peel_flags": [], "velocity_flags": [], "peel_chains": []}
+
 
     peel_wallets, qualifying_chains = detect_peel_chains(transfers)
     fwd_info = compute_forwarding_latency(transfers)
@@ -302,9 +335,12 @@ def _build_pdf(
     story.append(Spacer(1, 10))
 
     # Off-ramp Destinations
+    is_sol = not address.startswith("0x") and 32 <= len(address) <= 44
+    currency = "SOL" if is_sol else "ETH"
+
     story.append(Paragraph("2. REGULATED OFF-RAMP LEADS (FREEZE & SUBPOENA TARGETS)", heading2))
     if off_ramps:
-        off_data = [["Entity", "Type", "Address / Deposit", "Hops", "Tainted ETH", "Severity"]]
+        off_data = [["Entity", "Type", "Address / Deposit", "Hops", f"Tainted {currency}", "Severity"]]
         for o in off_ramps:
             addr_display = o.get("depositAddress") or o.get("address", "—")
             off_data.append([
@@ -361,7 +397,7 @@ def _build_pdf(
     # Transaction ledger excerpt
     story.append(Paragraph("4. TRANSACTION AUDIT LOG (TOP EXCERPT)", heading2))
     if transactions:
-        tx_data = [["#", "From", "To", "Amount (ETH)", "Timestamp"]]
+        tx_data = [["#", "From", "To", f"Amount ({currency})", "Timestamp"]]
         for i, tx in enumerate(transactions[:25], 1):
             tx_data.append([
                 str(i),
@@ -390,7 +426,8 @@ def _build_pdf(
 
 @router.post("/generate-dossier")
 def generate_dossier(req: DossierRequest):
-    address = req.address.strip().lower()
+    address = normalize_address(req.address)
+
 
     # Gather data internally
     offramp_res = vasp_offramps(WalletRequest(address=address))

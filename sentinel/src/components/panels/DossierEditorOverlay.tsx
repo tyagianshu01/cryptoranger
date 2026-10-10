@@ -130,11 +130,15 @@ export function DossierEditorOverlay({ onClose }: { onClose: () => void }) {
                         </thead>
                         <tbody>
                             {riskyAccounts.map((tx, idx) => {
-                                const subjectAddr = tx.fromAddress.toLowerCase() === traceResult.rootAddress.toLowerCase() ? tx.toAddress : tx.fromAddress;
+                                const isSol = traceResult.chain === 'SOL' || !traceResult.rootAddress.startsWith('0x');
+                                const matchesRoot = isSol
+                                    ? tx.fromAddress === traceResult.rootAddress
+                                    : tx.fromAddress.toLowerCase() === traceResult.rootAddress.toLowerCase();
+                                const subjectAddr = matchesRoot ? tx.toAddress : tx.fromAddress;
                                 return (
                                     <tr key={idx}>
                                         <td style={{ border: '1px solid #cbd5e1', padding: '6px', fontSize: '9px' }}>{subjectAddr}</td>
-                                        <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>{tx.amountEth.toFixed(4)} ETH</td>
+                                        <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>{tx.amountEth.toFixed(4)} {tx.symbol || (isSol ? 'SOL' : 'ETH')}</td>
                                         <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>{new Date(tx.timestamp).toLocaleString()}</td>
                                         <td style={{
                                             border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center',

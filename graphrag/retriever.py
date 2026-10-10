@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from db_connect import get_db_driver
 from graphrag.indexer import CommunityIndexer
 from graphrag.schema import GraphCitation, GraphContext, QueryIntent
-from normalize import get_label_info, get_label_type
+from normalize import get_label_info, get_label_type, normalize_address
 
 logger = logging.getLogger("graphrag.retriever")
 
@@ -21,6 +21,7 @@ logger = logging.getLogger("graphrag.retriever")
 class GraphRetriever:
     """
     Retrieves topological and semantic context from Neo4j and the community index.
+    Supports both Ethereum and Solana graphs.
     """
     def __init__(self, community_indexer: CommunityIndexer):
         self.community_indexer = community_indexer
@@ -33,6 +34,7 @@ class GraphRetriever:
     ) -> Tuple[Dict[str, Any], List[GraphCitation]]:
         """
         Retrieves the 1-hop and 2-hop transaction neighborhood for given addresses.
+        Supports both Ethereum (tripartite) and Solana (direct transfer) schemas.
         """
         close_driver = False
         if driver is None:
@@ -42,7 +44,7 @@ class GraphRetriever:
         if driver is None or not addresses:
             return {}, []
 
-        normalized_addrs = [a.lower().strip() for a in addresses]
+        normalized_addrs = [normalize_address(a) for a in addresses]
         citations: List[GraphCitation] = []
         seen_citations: Set[str] = set()
 
@@ -56,38 +58,79 @@ class GraphRetriever:
             ))
             seen_citations.add(a)
 
-        query = """
-        MATCH (s:Wallet)-[:SENT|SENT_TOKEN]->(tx)-[:TO|TOKEN_TO]->(r:Wallet)
-        WHERE toLower(s.address) IN $addrs OR toLower(r.address) IN $addrs
-        RETURN toLower(s.address) AS sender,
-               toLower(r.address) AS receiver,
-               tx.hash AS tx_hash,
-               coalesce(tx.value_eth, tx.value_token, 0.0) AS amount,
-               coalesce(tx.token_symbol, 'ETH') AS symbol,
-               coalesce(tx.timestamp.epochSeconds, 0) AS timestamp
-        ORDER BY tx.timestamp.epochSeconds DESC
-        LIMIT $limit
-        """
+        sol_addrs = [a for a in normalized_addrs if not a.startswith("0x") and 32 <= len(a) <= 44]
+        eth_addrs = [a for a in normalized_addrs if a.startswith("0x")]
 
         transfers = []
         try:
             with driver.session() as session:
-                res = session.run(query, addrs=normalized_addrs, limit=limit)
-                for record in res:
-                    tx_h = record["tx_hash"]
-                    sender = record["sender"]
-                    receiver = record["receiver"]
-                    amount = float(record["amount"] or 0.0)
-                    symbol = record["symbol"]
+                # 1. Query Solana transfers if any solana addresses are present
+                if sol_addrs:
+                    sol_query = """
+                    MATCH (s:Account)-[r:TRANSFERRED]->(m:Account)
+                    WHERE s.address IN $addrs OR m.address IN $addrs
+                    RETURN s.address AS sender,
+                           m.address AS receiver,
+                           r.signature AS tx_hash,
+                           coalesce(r.amount, 0.0) AS amount,
+                           coalesce(r.token, 'SOL') AS symbol,
+                           coalesce(r.timestamp, 0) AS timestamp
+                    ORDER BY r.timestamp DESC
+                    LIMIT $limit
+                    """
+                    res_sol = session.run(sol_query, addrs=sol_addrs, limit=limit)
+                    for record in res_sol:
+                        tx_h = record["tx_hash"]
+                        sender = record["sender"]
+                        receiver = record["receiver"]
+                        amount = float(record["amount"] or 0.0)
+                        symbol = record["symbol"]
+                        transfers.append({
+                            "sender": sender,
+                            "receiver": receiver,
+                            "tx_hash": tx_h,
+                            "amount": amount,
+                            "symbol": symbol,
+                            "timestamp": record["timestamp"]
+                        })
 
-                    transfers.append({
-                        "sender": sender,
-                        "receiver": receiver,
-                        "tx_hash": tx_h,
-                        "amount": amount,
-                        "symbol": symbol,
-                        "timestamp": record["timestamp"]
-                    })
+                # 2. Query Ethereum transfers if any eth addresses are present
+                if eth_addrs or not sol_addrs:
+                    query_addrs = eth_addrs if eth_addrs else normalized_addrs
+                    query_eth = """
+                    MATCH (s:Wallet)-[:SENT|SENT_TOKEN]->(tx)-[:TO|TOKEN_TO]->(r:Wallet)
+                    WHERE toLower(s.address) IN $addrs OR toLower(r.address) IN $addrs
+                    RETURN toLower(s.address) AS sender,
+                           toLower(r.address) AS receiver,
+                           tx.hash AS tx_hash,
+                           coalesce(tx.value_eth, tx.value_token, 0.0) AS amount,
+                           coalesce(tx.token_symbol, 'ETH') AS symbol,
+                           coalesce(tx.timestamp.epochSeconds, 0) AS timestamp
+                    ORDER BY tx.timestamp.epochSeconds DESC
+                    LIMIT $limit
+                    """
+                    res_eth = session.run(query_eth, addrs=query_addrs, limit=limit)
+                    for record in res_eth:
+                        tx_h = record["tx_hash"]
+                        sender = record["sender"]
+                        receiver = record["receiver"]
+                        amount = float(record["amount"] or 0.0)
+                        symbol = record["symbol"]
+                        transfers.append({
+                            "sender": sender,
+                            "receiver": receiver,
+                            "tx_hash": tx_h,
+                            "amount": amount,
+                            "symbol": symbol,
+                            "timestamp": record["timestamp"]
+                        })
+
+                for t in transfers:
+                    tx_h = t["tx_hash"]
+                    sender = t["sender"]
+                    receiver = t["receiver"]
+                    amount = t["amount"]
+                    symbol = t["symbol"]
 
                     if tx_h and tx_h not in seen_citations:
                         citations.append(GraphCitation(
@@ -129,6 +172,7 @@ class GraphRetriever:
     ) -> Tuple[List[Dict[str, Any]], List[GraphCitation]]:
         """
         Searches for directed fund flows terminating at known exchanges or service providers.
+        Supports both Ethereum and Solana.
         """
         close_driver = False
         if driver is None:
@@ -138,14 +182,25 @@ class GraphRetriever:
         if driver is None:
             return [], []
 
-        src = source_address.lower().strip()
-        query = f"""
-        MATCH p = (src:Wallet)-[:SENT*1..{max_depth}]->(dst:Wallet)
-        WHERE toLower(src.address) = $src
-        RETURN [node in nodes(p) | toLower(node.address)] AS path_addrs,
-               length(p) AS hops
-        LIMIT 5
-        """
+        src = normalize_address(source_address)
+        is_sol = not src.startswith("0x") and 32 <= len(src) <= 44
+
+        if is_sol:
+            query = f"""
+            MATCH p = (src:Account)-[r:TRANSFERRED*1..{max_depth}]->(dst:Account)
+            WHERE src.address = $src
+            RETURN [node in nodes(p) | node.address] AS path_addrs,
+                   length(p) AS hops
+            LIMIT 5
+            """
+        else:
+            query = f"""
+            MATCH p = (src:Wallet)-[:SENT*1..{max_depth}]->(dst:Wallet)
+            WHERE toLower(src.address) = $src
+            RETURN [node in nodes(p) | toLower(node.address)] AS path_addrs,
+                   length(p) AS hops
+            LIMIT 5
+            """
 
         paths: List[Dict[str, Any]] = []
         citations: List[GraphCitation] = []
@@ -173,6 +228,7 @@ class GraphRetriever:
                         ))
         except Exception as e:
             logger.error(f"Error executing path search in Neo4j: {e}")
+
         finally:
             if close_driver:
                 driver.close()

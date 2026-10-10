@@ -79,7 +79,7 @@ export function InspectorDossier() {
                 Metrics
               </div>
               <MetaRow label="Type"        value={selectedNode.type.replace('_', ' ')} />
-              <MetaRow label="Balance"     value={`${selectedNode.balance.toFixed(4)} ETH`} highlight />
+              <MetaRow label="Balance"     value={`${selectedNode.balance.toFixed(4)} ${selectedNode.chain || (traceResult?.chain || 'ETH')}`} highlight />
               <MetaRow label="USD value"   value={`$${selectedNode.balanceUsd.toLocaleString()}`} />
               <MetaRow label="Tx count"    value={selectedNode.txCount.toLocaleString()} />
               <MetaRow label="Hop depth"   value={`${selectedNode.hopDepth}`} />
@@ -87,7 +87,10 @@ export function InspectorDossier() {
               <MetaRow label="Last active" value={timeSince(selectedNode.lastActive)} />
 
               <button
-                onClick={() => useStore.getState().runTrace(selectedNode.address, 1)}
+                onClick={() => {
+                  const isSol = selectedNode.chain === 'SOL' || !selectedNode.address.startsWith('0x');
+                  useStore.getState().runTrace(selectedNode.address, 1, isSol ? 5 : 100);
+                }}
                 className="btn btn-primary"
                 style={{ width: '100%', marginTop: '0.75rem', fontSize: '11px' }}
               >

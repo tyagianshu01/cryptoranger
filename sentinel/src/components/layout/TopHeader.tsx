@@ -27,7 +27,9 @@ export function TopHeader() {
     if (inputAddr.trim()) {
       let epoch = 0;
       if (inputEpochDate) epoch = Math.floor(new Date(inputEpochDate).getTime() / 1000);
-      runTrace(inputAddr.trim(), inputHops, inputLimit, epoch);
+      const isSol = !/^0x[0-9a-fA-F]{40}$/i.test(inputAddr.trim());
+      const limitToUse = isSol && inputLimit === 100 ? 5 : inputLimit;
+      runTrace(inputAddr.trim(), inputHops, limitToUse, epoch);
     }
   };
 
@@ -105,9 +107,18 @@ export function TopHeader() {
             id="wallet-address-input"
             type="text"
             value={inputAddr}
-            onChange={(e) => setInputAddr(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setInputAddr(val);
+              const trimmed = val.trim();
+              if (trimmed && !/^0x[0-9a-fA-F]{40}$/i.test(trimmed) && inputLimit === 100) {
+                setInputLimit(5);
+              } else if (trimmed && /^0x[0-9a-fA-F]{40}$/i.test(trimmed) && inputLimit === 5) {
+                setInputLimit(100);
+              }
+            }}
             onKeyDown={(e) => e.key === "Enter" && handleTrace()}
-            placeholder="Enter Ethereum wallet address (0x...)"
+            placeholder="Enter wallet address (0x... or Solana)"
             style={{
               flex: 1,
               background: "none", border: "none", outline: "none",
@@ -173,9 +184,9 @@ export function TopHeader() {
             <select id="asset-type-select" value={useStore((s) => s.graphAssetFilter)}
               onChange={(e) => useStore.getState().setGraphAssetFilter(e.target.value as any)}
               style={selectStyle}>
-              <option value="ALL">All (ETH & ERC-20)</option>
-              <option value="ETH">Native ETH</option>
-              <option value="TOKEN">ERC-20 only</option>
+              <option value="ALL">All (Native & Token)</option>
+              <option value="ETH">Native (ETH/SOL)</option>
+              <option value="TOKEN">Tokens only</option>
             </select>
           </FilterChip>
 
@@ -193,6 +204,7 @@ export function TopHeader() {
             <select id="limit-count-select" value={inputLimit}
               onChange={(e) => setInputLimit(Number(e.target.value))}
               style={selectStyle}>
+              <option value={5}>5 (quick / Solana)</option>
               <option value={100}>100 (fast)</option>
               <option value={500}>500 (deep)</option>
               <option value={2000}>2000</option>
@@ -241,7 +253,7 @@ export function TopHeader() {
           </>
         ) : (
           <span className="code-terminal" style={{ color: "var(--color-text-faint)", fontSize: '11px' }}>
-            {traceLoading ? "Fetching transactions from Etherscan and Neo4j…" : "Enter a wallet address above to begin analysis"}
+            {traceLoading ? "Fetching transactions from blockchain and Neo4j…" : "Enter a wallet address above to begin analysis"}
           </span>
         )}
       </div>

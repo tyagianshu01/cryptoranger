@@ -132,12 +132,13 @@ export function LinkedTransactionsPage() {
                     </td>
                     <td style={tdStyle}>
                       <span style={{ fontWeight: 600, color: 'var(--color-text)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
-                        {tx.amountEth.toFixed(4)} ETH
+                        {tx.amountEth.toFixed(4)} {tx.symbol || 'ETH'}
                       </span>
                       <div style={{ fontSize: '10px', color: 'var(--color-text-faint)', marginTop: '2px', fontFamily: 'var(--font-mono)' }}>
                         ≈ ${tx.amountUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                       </div>
                     </td>
+
                     <td style={tdStyle}>
                       {tx.riskScore > 0 ? (
                         <div style={{

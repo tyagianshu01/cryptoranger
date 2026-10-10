@@ -7,7 +7,7 @@ Implements Section 3 (Stage 2) of risk_score.md.
 
 from collections import deque, defaultdict
 from typing import Dict, List, Set, Any
-from normalize import GAMMA, MAX_HOPS, is_dust, get_label_type
+from normalize import GAMMA, MAX_HOPS, is_dust, get_label_type, normalize_address
 
 
 def compute_forward_taint(
@@ -19,39 +19,40 @@ def compute_forward_taint(
 ) -> Dict[str, float]:
     """
     Computes forward-only haircut taint propagation from origin_set.
+    Supports both Ethereum and Solana native transfers.
 
     Args:
         origin_set: Set of origin wallet addresses (e.g. {root} or 1st-hop recipients).
         transfers: List of transfer dictionaries with keys:
-                   'source', 'target', 'amount' (in ETH), 'assetType' ('eth'/'token').
+                   'source', 'target', 'amount', 'assetType' ('eth'/'sol'/'token').
         gamma: Per-hop retention factor (default 0.9).
         max_hops: Maximum wallet-to-wallet hops (default 5).
         victim_wallets: Wallets that must never receive taint (e.g. reporting victims).
 
     Returns:
-        Dict mapping lowercase wallet address to taint value in [0.0, 1.0].
+        Dict mapping wallet address (normalized) to taint value in [0.0, 1.0].
     """
     if victim_wallets is None:
         victim_wallets = set()
-    victim_wallets = {v.lower().strip() for v in victim_wallets}
-    origin_set = {s.lower().strip() for s in origin_set}
+    victim_wallets = {normalize_address(v) for v in victim_wallets}
+    origin_set = {normalize_address(s) for s in origin_set}
 
-    # Filter to valid non-dust native ETH transfers only (Stage 0 scoring scope)
-    eth_transfers = [
+    # Filter to valid non-dust native transfers only (ETH or SOL)
+    native_transfers = [
         t for t in transfers
-        if t.get("assetType", "eth") == "eth" and not is_dust(t.get("amount", 0.0))
+        if t.get("assetType", "eth") in ("eth", "sol") and not is_dust(t.get("amount", 0.0))
     ]
 
-    # Pre-calculate total non-dust ETH inflow for each wallet
-    inflow_eth: Dict[str, float] = defaultdict(float)
+    # Pre-calculate total non-dust native inflow for each wallet
+    inflow_native: Dict[str, float] = defaultdict(float)
     out_edges: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     in_edges: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
-    for t in eth_transfers:
-        u = t["source"].lower().strip()
-        v = t["target"].lower().strip()
+    for t in native_transfers:
+        u = normalize_address(t["source"])
+        v = normalize_address(t["target"])
         amt = float(t.get("amount", 0.0))
-        inflow_eth[v] += amt
+        inflow_native[v] += amt
         out_edges[u].append(t)
         in_edges[v].append(t)
 
@@ -82,7 +83,7 @@ def compute_forward_taint(
             continue
 
         for t in out_edges[curr]:
-            nxt = t["target"].lower().strip()
+            nxt = normalize_address(t["target"])
             # Victims and origin set cannot be added to later layers
             if nxt in victim_wallets or nxt in origin_set:
                 continue
@@ -100,7 +101,7 @@ def compute_forward_taint(
                 taint[v] = 0.0
                 continue
 
-            tot_inflow = inflow_eth.get(v, 0.0)
+            tot_inflow = inflow_native.get(v, 0.0)
             if tot_inflow <= 0.0:
                 taint[v] = 0.0
                 continue
@@ -108,7 +109,7 @@ def compute_forward_taint(
             # Sum over non-dust transfers from strictly earlier layers
             tainted_incoming = 0.0
             for t in in_edges[v]:
-                u = t["source"].lower().strip()
+                u = normalize_address(t["source"])
                 u_layer = node_layer.get(u)
                 if u_layer is not None and u_layer < k:
                     tainted_incoming += taint[u] * float(t.get("amount", 0.0))

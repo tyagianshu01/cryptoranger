@@ -101,10 +101,22 @@ def is_dust(amt_eth: float) -> bool:
     return amt_eth < DUST_ETH
 
 
+def normalize_address(address: str) -> str:
+    """Normalizes address: lowercases Ethereum addresses, preserves Base58 Solana addresses."""
+    s = str(address).strip()
+    if not s.startswith("0x") and 32 <= len(s) <= 44:
+        return s
+    return s.lower()
+
+
 def get_label_info(address: str) -> Dict[str, Any]:
-    """Returns label information for an address."""
-    addr_lower = address.lower().strip()
-    return LABELS.get(addr_lower, {"name": f"Wallet-{addr_lower[:6]}", "type": "none"})
+    """Returns label information for an address (ETH or Solana)."""
+    raw = str(address).strip()
+    from config import SOLANA_KNOWN_VASPS
+    if raw in SOLANA_KNOWN_VASPS:
+        return {"name": SOLANA_KNOWN_VASPS[raw], "type": "vasp"}
+    addr_lower = raw.lower()
+    return LABELS.get(addr_lower, {"name": f"Wallet-{raw[:6]}", "type": "none"})
 
 
 def get_label_type(address: str) -> LabelType:
@@ -121,16 +133,18 @@ def get_origin_set(
     Computes the initial taint origin set S based on the reported role.
     If reported_role == 'victim': S is the set of first-hop recipients.
     If reported_role == 'suspect': S is {root_address}.
+    Preserves case for Solana addresses.
     """
-    root_lower = root_address.lower().strip()
+    norm_root = normalize_address(root_address)
     if reported_role.lower() == "victim":
         if outbound_transfers_from_root:
             recipients = {
-                t["target"].lower().strip()
+                normalize_address(t["target"])
                 for t in outbound_transfers_from_root
                 if not is_dust(t.get("amount", 0.0))
             }
             if recipients:
                 return recipients
         return set()
-    return {root_lower}
+    return {norm_root}
+

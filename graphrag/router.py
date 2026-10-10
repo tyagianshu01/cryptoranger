@@ -14,20 +14,25 @@ from graphrag.schema import IntentClassificationResult, QueryIntent
 
 _ETH_ADDR_RE = re.compile(r"0x[a-fA-F0-9]{40}")
 _ETH_TX_RE = re.compile(r"0x[a-fA-F0-9]{64}")
+_SOL_ADDR_RE = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
 
 
 class GraphRouter:
     """
     Routes investigative inquiries to the optimal retrieval modality.
     Tolerates common investigative typos (e.g., 'walletes', 'hogh', 'suspekts').
+    Supports both Ethereum and Solana addresses.
     """
 
     @staticmethod
     def classify_intent(query: str) -> IntentClassificationResult:
         q_lower = query.lower()
 
-        extracted_addrs = list(set(_ETH_ADDR_RE.findall(query)))
+        eth_addrs = _ETH_ADDR_RE.findall(query)
+        sol_addrs = [a for a in _SOL_ADDR_RE.findall(query) if len(a) >= 32 and not a.startswith("0x")]
+        extracted_addrs = list(set(eth_addrs + sol_addrs))
         extracted_txs = list(set(_ETH_TX_RE.findall(query)))
+
 
         # 1. Explicit Cypher generation request
         if any(term in q_lower for term in ["cypher", "write query", "neo4j query", "match (", "return p"]):

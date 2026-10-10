@@ -16,7 +16,7 @@ from normalize import (
     PROBABLE_DEPOSIT_SWEEP_RATIO, PROBABLE_DEPOSIT_SWEEP_WINDOW,
     OFFRAMP_CRITICAL_ETH, OFFRAMP_CRITICAL_HOPS, OFFRAMP_CRITICAL_CONF,
     OFFRAMP_HIGH_ETH, OFFRAMP_HIGH_HOPS, OFFRAMP_HIGH_CONF,
-    is_dust, get_label_info, get_label_type,
+    is_dust, get_label_info, get_label_type, normalize_address,
 )
 from scoring.patterns import _parse_timestamp
 
@@ -28,15 +28,16 @@ def detect_off_ramps(
     """
     Identifies confirmed VASPs and probable deposit addresses sweeping into a VASP.
     Returns {address: {"entity": str, "confidence_label": "confirmed"|"probable", "sweep_target": str|None}}
+    Supports both Ethereum and Solana.
     """
     off_ramps: Dict[str, Dict[str, Any]] = {}
 
     # 1. Confirmed VASPs
     for w in wallets:
-        w_lower = w.lower().strip()
-        label_info = get_label_info(w_lower)
+        w_norm = normalize_address(w)
+        label_info = get_label_info(w_norm)
         if label_info.get("type") == "vasp":
-            off_ramps[w_lower] = {
+            off_ramps[w_norm] = {
                 "entity": label_info.get("name", "VASP"),
                 "confidence_label": "confirmed",
                 "depositAddress": None,
@@ -45,27 +46,28 @@ def detect_off_ramps(
 
     # 2. Probable deposit addresses: unlabelled, >= 90% non-dust outflow sweeps to a single VASP,
     # >= 2 inbound transfers, and forwarding within 24h
-    eth_txs = [
+    native_txs = [
         t for t in transfers
-        if t.get("assetType", "eth") == "eth" and not is_dust(t.get("amount", 0.0))
+        if t.get("assetType", "eth") in ("eth", "sol") and not is_dust(t.get("amount", 0.0))
     ]
 
     out_per_node: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     in_per_node: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
-    for t in eth_txs:
-        src = t["source"].lower().strip()
-        tgt = t["target"].lower().strip()
+    for t in native_txs:
+        src = normalize_address(t["source"])
+        tgt = normalize_address(t["target"])
         out_per_node[src].append(t)
         in_per_node[tgt].append(t)
 
     for w in wallets:
-        w_lower = w.lower().strip()
-        if w_lower in off_ramps or get_label_type(w_lower) != "none":
+        w_norm = normalize_address(w)
+        if w_norm in off_ramps or get_label_type(w_norm) != "none":
             continue
 
-        in_txs = in_per_node.get(w_lower, [])
-        out_txs = out_per_node.get(w_lower, [])
+
+        in_txs = in_per_node.get(w_norm, [])
+        out_txs = out_per_node.get(w_norm, [])
 
         if len(in_txs) < 2 or not out_txs:
             continue
@@ -77,7 +79,7 @@ def detect_off_ramps(
         # Group outflows by VASP destination
         vasp_outflows: Dict[str, float] = defaultdict(float)
         for t in out_txs:
-            tgt = t["target"].lower().strip()
+            tgt = normalize_address(t["target"])
             if tgt in off_ramps and off_ramps[tgt]["confidence_label"] == "confirmed":
                 vasp_outflows[tgt] += float(t.get("amount", 0.0))
 
@@ -95,10 +97,10 @@ def detect_off_ramps(
 
             if sweep_delay <= PROBABLE_DEPOSIT_SWEEP_WINDOW:
                 parent_entity = off_ramps[top_vasp]["entity"]
-                off_ramps[w_lower] = {
+                off_ramps[w_norm] = {
                     "entity": f"{parent_entity} (Deposit)",
                     "confidence_label": "probable",
-                    "depositAddress": w_lower,
+                    "depositAddress": w_norm,
                     "sweep_target": top_vasp,
                 }
 
@@ -113,21 +115,22 @@ def search_highest_flow_paths(
     hop_penalty: float = LAMBDA_HOP_PENALTY,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Builds directed graph of non-dust ETH transfers and runs Dijkstra
+    Builds directed graph of non-dust native transfers and runs Dijkstra
     with edge cost = -ln(share) + lambda, depth-limited to max_hops.
     Returns {off_ramp: {"path": list, "hops": int, "pathFlowShare": float}}
+    Supports both Ethereum and Solana.
     """
-    eth_txs = [
+    native_txs = [
         t for t in transfers
-        if t.get("assetType", "eth") == "eth" and not is_dust(t.get("amount", 0.0))
+        if t.get("assetType", "eth") in ("eth", "sol") and not is_dust(t.get("amount", 0.0))
     ]
 
     outflow_per_node: Dict[str, float] = defaultdict(float)
     graph_edges: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
-    for t in eth_txs:
-        u = t["source"].lower().strip()
-        v = t["target"].lower().strip()
+    for t in native_txs:
+        u = normalize_address(t["source"])
+        v = normalize_address(t["target"])
         amt = float(t.get("amount", 0.0))
         outflow_per_node[u] += amt
         graph_edges[u][v] += amt
@@ -145,15 +148,15 @@ def search_highest_flow_paths(
     best_paths: Dict[str, Dict[str, Any]] = {}
 
     for origin in origin_set:
-        origin_lower = origin.lower().strip()
+        origin_norm = normalize_address(origin)
         # Priority queue stores: (cumulative_cost, hop_count, current_node, path_nodes, flow_share)
-        pq = [(0.0, 0, origin_lower, [origin_lower], 1.0)]
+        pq = [(0.0, 0, origin_norm, [origin_norm], 1.0)]
         visited: Dict[str, float] = {}
 
         while pq:
             cost, hops, curr, path, q_share = heapq.heappop(pq)
 
-            if curr in off_ramp_set and curr != origin_lower:
+            if curr in off_ramp_set and curr != origin_norm:
                 if curr not in best_paths or cost < best_paths[curr]["cost"]:
                     best_paths[curr] = {
                         "path": path,
@@ -203,8 +206,8 @@ def evaluate_off_ramp_leads(
 
     all_wallets = set(taint_map.keys())
     for t in transfers:
-        all_wallets.add(t["source"].lower().strip())
-        all_wallets.add(t["target"].lower().strip())
+        all_wallets.add(normalize_address(t["source"]))
+        all_wallets.add(normalize_address(t["target"]))
 
     off_ramp_meta = detect_off_ramps(transfers, all_wallets)
     off_ramp_addresses = set(off_ramp_meta.keys())
@@ -230,25 +233,25 @@ def evaluate_off_ramp_leads(
     token_tx_counts: Dict[str, int] = defaultdict(int)
     for t in transfers:
         if t.get("assetType") == "token":
-            tgt = t.get("target", "").lower().strip()
+            tgt = normalize_address(t.get("target", ""))
             if tgt in off_ramp_addresses:
                 token_tx_counts[tgt] += 1
 
-    # Inbound non-dust ETH deposits for exposure calculation
-    eth_txs = [
+    # Inbound non-dust native deposits for exposure calculation
+    native_txs = [
         t for t in transfers
-        if t.get("assetType", "eth") == "eth" and not is_dust(t.get("amount", 0.0))
+        if t.get("assetType", "eth") in ("eth", "sol") and not is_dust(t.get("amount", 0.0))
     ]
 
     deposits_per_offramp: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for t in eth_txs:
-        tgt = t.get("target", "").lower().strip()
+    for t in native_txs:
+        tgt = normalize_address(t.get("target", ""))
         if tgt in off_ramp_addresses:
             deposits_per_offramp[tgt].append(t)
 
     # Cash-out peel lookup
     cash_out_peel_targets = {
-        chain["end"].lower().strip() for chain in peel_chains if chain.get("cash_out_peel")
+        normalize_address(chain["end"]) for chain in peel_chains if chain.get("cash_out_peel")
     }
 
     records: List[Dict[str, Any]] = []
@@ -259,13 +262,13 @@ def evaluate_off_ramp_leads(
 
         # Calculate exposure: tainted_eth = sum(taint(u) * amt)
         tainted_eth = sum(
-            taint_map.get(d["source"].lower().strip(), 0.0) * float(d.get("amount", 0.0))
+            taint_map.get(normalize_address(d["source"]), 0.0) * float(d.get("amount", 0.0))
             for d in deposits
         )
 
         # Confidence: max incoming taint
         conf = max(
-            [taint_map.get(d["source"].lower().strip(), 0.0) for d in deposits] or [0.0]
+            [taint_map.get(normalize_address(d["source"]), 0.0) for d in deposits] or [0.0]
         )
 
         # If reachable via path, check path endpoint taint as fallback
