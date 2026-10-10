@@ -93,7 +93,7 @@ def analyze_wallet(req: AnalyzeRequest):
         )
 
     # ==============================================================
-    # 1. FETCH DATA (Etherscan -> Neo4j via Tracer)
+    # 1. FETCH DATA + CONTINUOUS BFS TRACE (both ETH and SOL)
     # ==============================================================
     ml_evaluations: Dict[str, Dict[str, Any]] = {}
     if wallet_id != "unknown":
@@ -306,7 +306,7 @@ def analyze_wallet(req: AnalyzeRequest):
             "type": node_class,
             "riskScore": r_score,
             "balance": abs(stats["balance"]),
-            "balanceUsd": abs(stats["balance"]) * 2100,
+            "balanceUsd": abs(stats["balance"]) * (150.0 if is_sol else 2100.0),
             "firstSeen": datetime.utcnow().isoformat() + "Z",
             "lastActive": datetime.utcnow().isoformat() + "Z",
             "txCount": stats["txCount"],

@@ -17,16 +17,19 @@ Your task is to translate natural language investigative questions into highly o
 
 GRAPH SCHEMA:
 Nodes: 
-  - (Wallet {address: String})
-  - (Transaction {hash: String, timestamp: DateTime, value_eth: Float})
+  - Ethereum: (Wallet {address: String}), (Transaction {hash: String, timestamp: DateTime, value_eth: Float})
+  - Solana: (Account {address: String})
 
-Relationships (Tripartite Model): 
-  - (Wallet)-[:SENT]->(Transaction)
-  - (Transaction)-[:TO]->(Wallet)
+Relationships: 
+  - Ethereum (Tripartite Model): 
+      (Wallet)-[:SENT]->(Transaction)
+      (Transaction)-[:TO]->(Wallet)
+  - Solana (Direct Transfer Model): 
+      (sender:Account)-[r:TRANSFERRED {amount: Float, token: String, signature: String, timestamp: Integer}]->(receiver:Account)
 
 RULES:
 1. ONLY return the raw, unformatted Cypher code block. Do NOT use markdown code blocks (```cypher...```). Return just the strict query string.
-2. Ensure queries use aliases safely (e.g., sender, tx, receiver).
+2. Ensure queries use aliases safely (e.g., sender, tx, receiver, r).
 3. NEVER generate CREATE, DELETE, DETACH, SET, MERGE, or DROP commands. Read-only strictly.
 4. When possible, limit wild scans with LIMIT 100 unless requested otherwise.
 """

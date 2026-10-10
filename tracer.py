@@ -10,11 +10,10 @@ import os
 import time
 from collections import deque
 from typing import Dict, Any, List, Set, Tuple
-
 import numpy as np
-
-from config import KNOWN_VASPS
+from config import KNOWN_VASPS, SOLANA_KNOWN_VASPS
 from dataingestion import fetch_transactions
+from solana_integration import ingest_solana_wallet
 from db_connect import get_db_driver, store_in_neo4j, get_networkx_from_neo4j
 from feature_extraction import get_ml_features
 from logic import check_for_vasp, detect_next_suspicious_wallets
@@ -116,18 +115,30 @@ def evaluate_wallet_ml(driver, wallet_address: str, is_full_history: bool = True
         }
 
 
-def trace_funds(initial_victim: str, max_depth: int = 1, limit: int = 100):
-    """The main loop that controls fetching, storing, and analyzing."""
+def trace_funds(initial_victim, max_depth=1, limit=100, chain="ETH"):
+    """The main BFS loop that controls fetching, storing, and analyzing.
+    
+    Supports both Ethereum and Solana chains through the `chain` parameter.
+    - ETH: Etherscan ingestion + ML profiling + heuristic BFS
+    - SOL: Solana JSON-RPC ingestion + heuristic BFS (ML skipped — model trained on ETH features)
+    
+    Base58 Solana addresses are case-sensitive and are NEVER lowercased.
+    """
     driver = get_db_driver()
     if not driver:
-        return {}
+        return []
 
-    queue = deque([(initial_victim.lower().strip(), 0)])
+    is_sol = chain.upper() == "SOL"
+    
+    # Solana base58 is case-sensitive — NEVER call .lower() on it
+    root = initial_victim.strip() if is_sol else initial_victim.lower()
+
+    queue = deque([(root, 0)])
     visited = set()
 
     print(f"[START] Starting Automated Trace for: {initial_victim}")
     ml_results: Dict[str, Dict[str, Any]] = {}
-
+    vasp_set = set(SOLANA_KNOWN_VASPS.keys()) if is_sol else set(v.lower() for v in KNOWN_VASPS)
     # Check if history is truncated (hit limit)
     is_full_history = limit >= 1000
 
@@ -141,17 +152,23 @@ def trace_funds(initial_victim: str, max_depth: int = 1, limit: int = 100):
             continue
 
         visited.add(current_wallet)
-        print(f"\n--- Investigating (Depth {depth}): {current_wallet} ---")
+        print(f"\n--- Investigating (Depth {depth} | {chain}): {current_wallet} ---")
 
-        # 1. Ingest Data (Hit Etherscan)
-        tx_data = fetch_transactions(current_wallet, limit=limit)
-
-        # 2. Store in Neo4j
-        if tx_data:
-            store_in_neo4j(driver, tx_data)
+        # 1. Ingest Data (chain-specific)
+        if is_sol:
+            # Solana: JSON-RPC -> extract transfers -> Neo4j (Account)-[:TRANSFERRED]->(Account)
+            try:
+                ingest_solana_wallet(current_wallet, limit=min(limit, 100))
+            except Exception as e:
+                print(f"  [!] Solana Ingest Error: {e}")
+        else:
+            # Ethereum: Etherscan -> Neo4j (Wallet)-[:SENT]->(Transaction)-[:TO]->(Wallet)
+            tx_data = fetch_transactions(current_wallet, limit=limit)
+            if tx_data:
+                store_in_neo4j(driver, tx_data)
 
         # 3. Stage 1 Calibrated ML Behaviour Profiling
-        if model:
+        if not is_sol and model:
             eval_res = evaluate_wallet_ml(driver, current_wallet, is_full_history=is_full_history)
             ml_results[current_wallet] = eval_res
             if eval_res["ml_flag"]:
@@ -159,30 +176,36 @@ def trace_funds(initial_victim: str, max_depth: int = 1, limit: int = 100):
             else:
                 print(f"  [ML] {current_wallet} evaluated as legitimate (p_ml: {eval_res['p_ml']:.2%})")
 
-        # 4. Sync Graph for Heuristic Analysis
+        # 3. Sync Graph for Heuristic Analysis
         G = get_networkx_from_neo4j(driver)
 
-        # 5. Run DSA logic (Check if hit VASP)
-        if check_for_vasp(G, initial_victim):
-            print("\n[SUCCESS] Trace Complete. Exchange identified.")
+        # 4. Run DSA logic (Check if funds hit a known VASP)
+        if check_for_vasp(G, root, chain=chain):
+            print(f"\n[SUCCESS] Trace Complete ({chain}). Exchange identified.")
             driver.close()
             return ml_results
 
-        # 6. Heuristic Analysis (Find next hops)
-        next_targets = detect_next_suspicious_wallets(G, current_wallet)
+        # 5. Heuristic Analysis (Find next suspicious hops — peel chain detection)
+        next_targets = detect_next_suspicious_wallets(G, current_wallet, chain=chain)
+
         for target in next_targets:
-            target_lower = target.lower().strip()
-            if target_lower not in visited and target_lower not in [v.lower() for v in KNOWN_VASPS]:
-                print(f"[START] Starting Auto-Trace for suspicious hop: {target_lower}")
-                queue.append((target_lower, depth + 1))
+            # Solana: case-sensitive comparison; ETH: lowercase comparison
+            target_key = target if is_sol else target.lower()
+            if target_key not in visited and target_key not in vasp_set:
+                print(f"  [+] Suspicious peel-chain hop discovered: {target} -> Queuing (Depth {depth + 1})")
+                queue.append((target, depth + 1))
 
-        time.sleep(0.5)
+        # Respect API rate limits (Solana public RPC is more aggressive with 429s)
+        time.sleep(1.0 if is_sol else 0.5)
 
-    print("\n[WARN] Trace finished. Max depth reached or trail went cold.")
+    print(f"\n[WARN] Trace finished ({chain}). Max depth reached or trail went cold.")
     driver.close()
     return ml_results
 
 
 if __name__ == "__main__":
-    VICTIM_WALLET = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
-    trace_funds(VICTIM_WALLET, max_depth=1)
+    import sys
+    victim_wallet = sys.argv[1] if len(sys.argv) > 1 else "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+    # Auto-detect chain based on address format
+    chain_arg = sys.argv[2] if len(sys.argv) > 2 else ("SOL" if not victim_wallet.startswith("0x") and 32 <= len(victim_wallet) <= 44 else "ETH")
+    trace_funds(victim_wallet, max_depth=2, limit=5, chain=chain_arg)

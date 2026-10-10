@@ -4,42 +4,61 @@ logic.py
 NetworkX graph helpers for VASP checking and next-hop exploration.
 Aligned with risk_score.md v2.1 specifications with calibrated peel-chain logic.
 """
+import os
+from datetime import datetime
+from dotenv import load_dotenv
 
 from typing import List
 import networkx as nx
+from config import KNOWN_VASPS, SOLANA_KNOWN_VASPS, SOLANA_EXCLUDED_ACCOUNTS
 from normalize import LABELS, is_dust, PEEL_MAIN_MIN, PEEL_MAIN_MAX, get_label_type
 
-
-def check_for_vasp(G: nx.DiGraph, start_node: str) -> bool:
-    """Checks if there is an active path from start_node to any known VASP off-ramp."""
-    start_lower = start_node.lower().strip()
-    if start_lower not in G.nodes:
+def check_for_vasp(G, start_node, chain="ETH"):
+    """Checks if there is a path from the victim to any known exchange.
+    
+    For ETH: checks KNOWN_VASPS (hex, case-insensitive).
+    For SOL: checks SOLANA_KNOWN_VASPS (base58, case-SENSITIVE).
+    """
+    is_sol = chain.upper() == "SOL"
+    
+    # Solana base58 addresses are case-sensitive — never call .lower()
+    source = start_node.strip() if is_sol else start_node.strip().lower()
+    
+    if source not in G.nodes:
         return False
+    
+    if is_sol:
+        target_vasps = list(SOLANA_KNOWN_VASPS.keys())
+    else:
+        target_vasps = [addr for addr, info in LABELS.items() if info.get("type") == "vasp"]
 
-    vasp_addrs = [addr for addr, info in LABELS.items() if info.get("type") == "vasp"]
-
-    for vasp in vasp_addrs:
+    
+    for vasp in target_vasps:
         if vasp in G.nodes:
             try:
-                path = nx.shortest_path(G, source=start_lower, target=vasp)
-                vasp_name = LABELS.get(vasp, {}).get("name", "Unknown VASP")
-                print(f"\n[ALERT] Funds reached known VASP: {vasp_name} ({vasp})")
+                path = nx.shortest_path(G, source=source, target=vasp)
+                label = SOLANA_KNOWN_VASPS.get(vasp, vasp) if is_sol else LABELS.get(vasp, {}).get("name", "Unknown VASP")
+                print(f"\n[ALERT] Funds reached known VASP ({chain}): {label}")
                 print(" -> ".join(path))
                 return True
             except (nx.NetworkXNoPath, nx.NodeNotFound):
                 continue
     return False
 
-
-def detect_next_suspicious_wallets(G: nx.DiGraph, current_wallet: str) -> List[str]:
+def detect_next_suspicious_wallets(G, current_wallet, chain="ETH"):
     """
-    Returns receiving wallets that qualify as suspicious peel-chain hops.
-    Filters out dust transfers, halts crawl at known VASPs/mixers/bridges,
-    and removes redundant broad splits (e.g. >= 25%) that inflate risk on benign wallets.
+    Returns a list of receiving wallets that look like part of a peel chain 
+    (i.e., received a large percentage of the outgoing funds).
+    
+    For SOL: filters out known system programs and DEX routers to prevent
+    the BFS from following infrastructure accounts into infinite loops.
     """
-    suspicious_receivers: List[str] = []
-    current_wallet = current_wallet.lower().strip()
-
+    is_sol = chain.upper() == "SOL"
+    suspicious_receivers = []
+    
+    # Solana base58 addresses are case-sensitive — never call .lower()
+    current_wallet = current_wallet.strip() if is_sol else current_wallet.strip().lower()
+    
     if current_wallet not in G.nodes:
         return suspicious_receivers
 
@@ -57,15 +76,15 @@ def detect_next_suspicious_wallets(G: nx.DiGraph, current_wallet: str) -> List[s
     total_out = sum(data.get("weight", 0.0) for _, _, data in valid_edges)
     if total_out <= 0:
         return suspicious_receivers
-
+    excluded = SOLANA_EXCLUDED_ACCOUNTS if is_sol else set()
     # A genuine peel chain has low fan-out (typically 2 branches: 1 peel + 1 main trunk)
     num_branches = len(valid_edges)
 
     for _, receiver, data in valid_edges:
-        rec_lower = receiver.lower().strip()
-
-        # Circuit breaker: Never follow past known VASPs, mixers, or bridges
-        if get_label_type(rec_lower) in {"vasp", "mixer", "bridge"}:
+        rec_lower=rec_lower.strip() if is_sol else receiver.lower().strip()
+        if is_sol and rec_lower in excluded:
+            continue
+        if not is_sol and get_label_type(rec_lower) in {"vasp", "mixer", "bridge"}:
             continue
 
         share = data.get("weight", 0.0) / total_out

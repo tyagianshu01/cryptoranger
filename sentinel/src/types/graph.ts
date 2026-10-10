@@ -27,7 +27,7 @@ export interface WalletNode {
   txCount: number;
   hopDepth: number;         // distance from root
   flagged: boolean;
-  chain: 'ETH' | 'BTC' | 'TRX' | 'BNB';
+  chain: 'ETH' | 'BTC' | 'TRX' | 'BNB' | 'SOL';
   clusterIds?: string[];    // fraud cluster membership
   mathMetrics?: {
     degreeCentrality: number;

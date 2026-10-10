@@ -130,8 +130,8 @@ WITH *,
 
 // Unique token names
 WITH *,
-     size(apoc.coll.toSet([t IN sentTokenTxs | t.token_name])) AS erc20UniqSentTokenName,
-     size(apoc.coll.toSet([t IN recTokenTxs  | t.token_name])) AS erc20UniqRecTokenName
+     size(coll.distinct([t IN sentTokenTxs | t.token_name])) AS erc20UniqSentTokenName,
+     size(coll.distinct([t IN recTokenTxs  | t.token_name])) AS erc20UniqRecTokenName
 
 RETURN
   // ---- Normal Stats ----
