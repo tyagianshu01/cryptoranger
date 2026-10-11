@@ -99,11 +99,11 @@ class GraphSynthesizer:
         context: GraphContext,
         chat_history: Optional[List[dict]] = None
     ) -> GraphRAGResponse:
-        gemini_key = os.getenv("GEMINI_API_KEY")
         openrouter_key = os.getenv("OPENROUTER_API_KEY")
-        if not gemini_key and not openrouter_key:
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        if not openrouter_key and not gemini_key:
             return GraphRAGResponse(
-                answer="Error: GEMINI_API_KEY is not configured in the environment.",
+                answer="Error: OPENROUTER_API_KEY is not configured in the environment.",
                 intent=context.intent,
                 citations=context.citations,
                 context_summary="Missing API key"
@@ -122,7 +122,41 @@ class GraphSynthesizer:
         answer_text = ""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                if gemini_key:
+                if openrouter_key:
+                    messages = [
+                        {"role": "system", "content": GRAPHRAG_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt_user}
+                    ]
+                    if chat_history:
+                        history_subset = chat_history[-3:]
+                        cleaned_history = [
+                            {"role": m.get("role", "user"), "content": m.get("content", "")}
+                            for m in history_subset
+                            if m.get("content")
+                        ]
+                        messages = [messages[0]] + cleaned_history + [messages[1]]
+
+                    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+                    res = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {openrouter_key}",
+                            "HTTP-Referer": "https://cryptotracker.sentinel",
+                            "X-Title": "CryptoTracker Sentinel",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": model,
+                            "messages": messages,
+                            "temperature": 0.2,
+                            "max_tokens": 700
+                        }
+                    )
+                    if res.is_success:
+                        answer_text = res.json()["choices"][0]["message"]["content"].strip()
+                    else:
+                        answer_text = f"AI Provider returned status {res.status_code}: {res.text}"
+                elif gemini_key:
                     model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
                     contents = []
@@ -142,34 +176,6 @@ class GraphSynthesizer:
                     res = await client.post(url, json=payload)
                     if res.is_success:
                         answer_text = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    else:
-                        answer_text = f"AI Provider returned status {res.status_code}: {res.text}"
-                else:
-                    messages = [
-                        {"role": "system", "content": GRAPHRAG_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt_user}
-                    ]
-                    if chat_history:
-                        history_subset = chat_history[-3:]
-                        cleaned_history = [
-                            {"role": m.get("role", "user"), "content": m.get("content", "")}
-                            for m in history_subset
-                            if m.get("content")
-                        ]
-                        messages = [messages[0]] + cleaned_history + [messages[1]]
-
-                    res = await client.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {openrouter_key}", "Content-Type": "application/json"},
-                        json={
-                            "model": "openai/gpt-4o-mini",
-                            "messages": messages,
-                            "temperature": 0.2,
-                            "max_tokens": 700
-                        }
-                    )
-                    if res.is_success:
-                        answer_text = res.json()["choices"][0]["message"]["content"].strip()
                     else:
                         answer_text = f"AI Provider returned status {res.status_code}: {res.text}"
         except Exception as e:

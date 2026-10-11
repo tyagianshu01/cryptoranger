@@ -61,12 +61,39 @@ async def chat_message(req: ChatRequest):
         # If it's a general support question without on-chain entities or graph requests,
         # provide guidance using the Sentinel persona
         if intent_classification.intent == QueryIntent.GENERAL_SUPPORT and not intent_classification.extracted_addresses:
-            gemini_key = os.getenv("GEMINI_API_KEY")
             openrouter_key = os.getenv("OPENROUTER_API_KEY")
-            if not gemini_key and not openrouter_key:
-                raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set.")
+            gemini_key = os.getenv("GEMINI_API_KEY")
+            if not openrouter_key and not gemini_key:
+                raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is not set.")
 
-            if gemini_key:
+            if openrouter_key:
+                payload_messages = [{"role": "system", "content": SUPPORT_SYSTEM_PROMPT}]
+                for msg in req.messages[-5:]:
+                    payload_messages.append({"role": msg.role, "content": msg.content})
+
+                model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+                async with httpx.AsyncClient(timeout=25.0) as client:
+                    res = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {openrouter_key}",
+                            "HTTP-Referer": "https://cryptotracker.sentinel",
+                            "X-Title": "CryptoTracker Sentinel",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": model,
+                            "messages": payload_messages,
+                            "temperature": 0.3,
+                            "max_tokens": 450
+                        }
+                    )
+                    if not res.is_success:
+                        raise Exception(f"OpenRouter HTTP {res.status_code}: {res.text}")
+                    data = res.json()
+                    ai_reply = data["choices"][0]["message"]["content"].strip()
+                    return {"content": ai_reply, "intent": "general_support", "citations": []}
+            elif gemini_key:
                 model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
                 contents = [
@@ -81,30 +108,9 @@ async def chat_message(req: ChatRequest):
                 async with httpx.AsyncClient(timeout=25.0) as client:
                     res = await client.post(url, json=payload)
                     if not res.is_success:
-                        raise Exception(f"HTTP {res.status_code}: {res.text}")
+                        raise Exception(f"Gemini HTTP {res.status_code}: {res.text}")
                     data = res.json()
                     ai_reply = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    return {"content": ai_reply, "intent": "general_support", "citations": []}
-            else:
-                payload_messages = [{"role": "system", "content": SUPPORT_SYSTEM_PROMPT}]
-                for msg in req.messages[-5:]:
-                    payload_messages.append({"role": msg.role, "content": msg.content})
-
-                async with httpx.AsyncClient(timeout=25.0) as client:
-                    res = await client.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {openrouter_key}", "Content-Type": "application/json"},
-                        json={
-                            "model": "openai/gpt-4o-mini",
-                            "messages": payload_messages,
-                            "temperature": 0.3,
-                            "max_tokens": 450
-                        }
-                    )
-                    if not res.is_success:
-                        raise Exception(f"HTTP {res.status_code}: {res.text}")
-                    data = res.json()
-                    ai_reply = data["choices"][0]["message"]["content"].strip()
                     return {"content": ai_reply, "intent": "general_support", "citations": []}
 
         # Otherwise, query GraphRAG over on-chain Neo4j context

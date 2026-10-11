@@ -131,10 +131,10 @@ class CommunityIndexer:
         )
 
     async def summarize_cluster_with_llm(self, cluster: CommunityCluster) -> str:
-        """Calls Gemini or OpenRouter LLM to craft a professional, forensic community summary."""
-        gemini_key = os.getenv("GEMINI_API_KEY")
+        """Calls OpenRouter or Gemini LLM to craft a professional, forensic community summary."""
         openrouter_key = os.getenv("OPENROUTER_API_KEY")
-        if not gemini_key and not openrouter_key:
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        if not openrouter_key and not gemini_key:
             return self.generate_rule_summary(cluster)
 
         members_sample = cluster.member_addresses[:6]
@@ -155,7 +155,26 @@ class CommunityIndexer:
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                if gemini_key:
+                if openrouter_key:
+                    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+                    res = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {openrouter_key}",
+                            "HTTP-Referer": "https://cryptotracker.sentinel",
+                            "X-Title": "CryptoTracker Sentinel",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.2,
+                            "max_tokens": 160
+                        }
+                    )
+                    if res.is_success:
+                        return res.json()["choices"][0]["message"]["content"].strip()
+                elif gemini_key:
                     model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
                     payload = {
@@ -165,19 +184,6 @@ class CommunityIndexer:
                     res = await client.post(url, json=payload)
                     if res.is_success:
                         return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                else:
-                    res = await client.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {openrouter_key}", "Content-Type": "application/json"},
-                        json={
-                            "model": "openai/gpt-4o-mini",
-                            "messages": [{"role": "user", "content": prompt}],
-                            "temperature": 0.2,
-                            "max_tokens": 160
-                        }
-                    )
-                    if res.is_success:
-                        return res.json()["choices"][0]["message"]["content"].strip()
         except Exception as e:
             logger.warning(f"Failed LLM call for {cluster.id}, falling back to rule summary: {e}")
 
