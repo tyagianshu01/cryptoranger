@@ -64,25 +64,31 @@ FEATURE_COLUMNS = [
 # This avoids pulling thousands of raw rows into Python.
 # ---------------------------------------------------------------------------
 FEATURE_QUERY = """
-// ---- Normal Transaction Stats ----
-OPTIONAL MATCH (w:Wallet {address: $address})-[:SENT]->(txOut:Transaction)-[:TO]->(rec:Wallet)
-WITH w,
-     collect(txOut) AS sentTxs,
-     collect(DISTINCT rec.address) AS uniqueSentTo
+// ---- Match Target Wallet Node (Case-Insensitive) ----
+OPTIONAL MATCH (w:Wallet) WHERE toLower(w.address) = toLower($address)
+WITH w
 
+// ---- Normal Sent Transactions ----
+OPTIONAL MATCH (w)-[:SENT]->(txOut:Transaction)-[:TO]->(rec:Wallet)
+WITH w,
+     collect(DISTINCT txOut) AS sentTxsRaw,
+     [r IN collect(DISTINCT rec.address) WHERE r IS NOT NULL] AS uniqueSentTo
+
+// ---- Normal Received Transactions ----
 OPTIONAL MATCH (sender:Wallet)-[:SENT]->(txIn:Transaction)-[:TO]->(w)
-WITH w, sentTxs, uniqueSentTo,
-     collect(txIn) AS recTxs,
-     collect(DISTINCT sender.address) AS uniqueRecFrom
+WITH w, uniqueSentTo,
+     [t IN sentTxsRaw WHERE t IS NOT NULL] AS sentTxs,
+     [t IN collect(DISTINCT txIn) WHERE t IS NOT NULL] AS recTxs,
+     [s IN collect(DISTINCT sender.address) WHERE s IS NOT NULL] AS uniqueRecFrom
 
 // Sent value stats
 WITH w, sentTxs, recTxs, uniqueSentTo, uniqueRecFrom,
      size(sentTxs) AS sentCount,
      size(recTxs) AS recCount,
      CASE WHEN size(sentTxs) > 0
-          THEN reduce(s = 0.0, t IN sentTxs | s + t.value_eth) ELSE 0.0 END AS totalSent,
+          THEN reduce(s = 0.0, t IN sentTxs | s + coalesce(t.value_eth, 0.0)) ELSE 0.0 END AS totalSent,
      CASE WHEN size(recTxs) > 0
-          THEN reduce(s = 0.0, t IN recTxs | s + t.value_eth) ELSE 0.0 END AS totalRec,
+          THEN reduce(s = 0.0, t IN recTxs | s + coalesce(t.value_eth, 0.0)) ELSE 0.0 END AS totalRec,
      size(uniqueSentTo) AS uniqSentTo,
      size(uniqueRecFrom) AS uniqRecFrom
 
@@ -95,30 +101,32 @@ WITH w, sentTxs, recTxs, sentCount, recCount, totalSent, totalRec,
 // Sent timestamps for average-time calculation
 WITH w, sentTxs, recTxs, sentCount, recCount, totalSent, totalRec,
      uniqSentTo, uniqRecFrom, contractsCreated,
-     [t IN sentTxs | t.timestamp.epochSeconds] AS sentTimes,
-     [t IN recTxs  | t.timestamp.epochSeconds] AS recTimes
+     [t IN sentTxs WHERE t.timestamp IS NOT NULL | t.timestamp.epochSeconds] AS sentTimes,
+     [t IN recTxs WHERE t.timestamp IS NOT NULL | t.timestamp.epochSeconds] AS recTimes
 
 // All timestamps combined for time-diff
 WITH *, (sentTimes + recTimes) AS allTimes
 
 // Sent value lists for min/max/avg
 WITH *,
-     [t IN sentTxs | t.value_eth] AS sentVals,
-     [t IN recTxs  | t.value_eth] AS recVals
+     [t IN sentTxs WHERE t.value_eth IS NOT NULL | t.value_eth] AS sentVals,
+     [t IN recTxs WHERE t.value_eth IS NOT NULL | t.value_eth] AS recVals
 
 // ---- ERC20 Token Transfer Stats ----
 OPTIONAL MATCH (w)-[:SENT_TOKEN]->(tkOut:TokenTransfer)-[:TOKEN_TO]->(tkRec:Wallet)
-WITH *, collect(tkOut) AS sentTokenTxs,
-     collect(DISTINCT tkRec.address) AS erc20UniqSentAddr
+WITH *, [t IN collect(DISTINCT tkOut) WHERE t IS NOT NULL] AS sentTokenTxs,
+     [r IN collect(DISTINCT tkRec.address) WHERE r IS NOT NULL] AS erc20UniqSentAddr,
+     [name IN collect(DISTINCT tkOut.token_name) WHERE name IS NOT NULL] AS erc20UniqSentTokenNames
 
 OPTIONAL MATCH (tkSender:Wallet)-[:SENT_TOKEN]->(tkIn:TokenTransfer)-[:TOKEN_TO]->(w)
-WITH *, collect(tkIn) AS recTokenTxs,
-     collect(DISTINCT tkSender.address) AS erc20UniqRecAddr
+WITH *, [t IN collect(DISTINCT tkIn) WHERE t IS NOT NULL] AS recTokenTxs,
+     [s IN collect(DISTINCT tkSender.address) WHERE s IS NOT NULL] AS erc20UniqRecAddr,
+     [name IN collect(DISTINCT tkIn.token_name) WHERE name IS NOT NULL] AS erc20UniqRecTokenNames
 
 // ERC20 contract-directed transfers
 OPTIONAL MATCH (w)-[:SENT_TOKEN]->(tkContract:TokenTransfer)-[:TOKEN_TO]->(cAddr:Wallet)
      WHERE cAddr.address STARTS WITH '0x'
-WITH *, collect(DISTINCT cAddr.address) AS erc20UniqRecContractAddr
+WITH *, [c IN collect(DISTINCT cAddr.address) WHERE c IS NOT NULL] AS erc20UniqRecContractAddr
 
 // Token value lists
 WITH *,
@@ -215,66 +223,75 @@ RETURN
   erc20UniqRecTokenName
 """
 
+
 def get_ml_features(driver, wallet_address):
     """
     Queries Neo4j to compute the 48 aggregated features for a single wallet.
     Returns a single-row pandas DataFrame aligned to the training dataset schema.
     """
-    address = wallet_address.lower()
+    address = wallet_address.lower().strip()
 
-    with driver.session() as session:
-        result = session.run(FEATURE_QUERY, address=address).single()
+    try:
+        with driver.session() as session:
+            result = session.run(FEATURE_QUERY, address=address).single()
+    except Exception as e:
+        print(f"  [Feature Extraction Warning] Cypher query failed for {address}: {e}")
+        result = None
 
     if not result:
         # Wallet not found in Neo4j -- return a zeroed-out row
         return pd.DataFrame([{col: 0.0 for col in FEATURE_COLUMNS}])
 
+    def _val(key, default=0.0):
+        val = result.get(key)
+        return float(val) if val is not None else default
+
     row = {
-        FEATURE_COLUMNS[0]:  result["avg_min_between_sent"],
-        FEATURE_COLUMNS[1]:  result["avg_min_between_rec"],
-        FEATURE_COLUMNS[2]:  result["time_diff_first_last"],
-        FEATURE_COLUMNS[3]:  result["sentCount"],
-        FEATURE_COLUMNS[4]:  result["recCount"],
-        FEATURE_COLUMNS[5]:  result["contractsCreated"],
-        FEATURE_COLUMNS[6]:  result["uniqRecFrom"],
-        FEATURE_COLUMNS[7]:  result["uniqSentTo"],
-        FEATURE_COLUMNS[8]:  result["min_val_rec"],
-        FEATURE_COLUMNS[9]:  result["max_val_rec"],
-        FEATURE_COLUMNS[10]: result["avg_val_rec"],
-        FEATURE_COLUMNS[11]: result["min_val_sent"],
-        FEATURE_COLUMNS[12]: result["max_val_sent"],
-        FEATURE_COLUMNS[13]: result["avg_val_sent"],
-        FEATURE_COLUMNS[14]: result["min_val_sent_contract"],
-        FEATURE_COLUMNS[15]: result["max_val_sent_contract"],
-        FEATURE_COLUMNS[16]: result["avg_val_sent_contract"],
-        FEATURE_COLUMNS[17]: result["total_txns"],
-        FEATURE_COLUMNS[18]: result["totalSent"],
-        FEATURE_COLUMNS[19]: result["totalRec"],
-        FEATURE_COLUMNS[20]: result["total_ether_sent_contracts"],
-        FEATURE_COLUMNS[21]: result["total_ether_balance"],
-        FEATURE_COLUMNS[22]: result["totalErc20Tnxs"],
-        FEATURE_COLUMNS[23]: result["erc20_total_rec"],
-        FEATURE_COLUMNS[24]: result["erc20_total_sent"],
-        FEATURE_COLUMNS[25]: result["erc20_total_sent_contract"],
-        FEATURE_COLUMNS[26]: result["erc20_uniq_sent_addr"],
-        FEATURE_COLUMNS[27]: result["erc20_uniq_rec_addr"],
-        FEATURE_COLUMNS[28]: result["erc20_uniq_sent_addr_1"],
-        FEATURE_COLUMNS[29]: result["erc20_uniq_rec_contract_addr"],
-        FEATURE_COLUMNS[30]: result["erc20_avg_time_sent"],
-        FEATURE_COLUMNS[31]: result["erc20_avg_time_rec"],
-        FEATURE_COLUMNS[32]: result["erc20_avg_time_rec2"],
-        FEATURE_COLUMNS[33]: result["erc20_avg_time_contract"],
-        FEATURE_COLUMNS[34]: result["erc20_min_val_rec"],
-        FEATURE_COLUMNS[35]: result["erc20_max_val_rec"],
-        FEATURE_COLUMNS[36]: result["erc20_avg_val_rec"],
-        FEATURE_COLUMNS[37]: result["erc20_min_val_sent"],
-        FEATURE_COLUMNS[38]: result["erc20_max_val_sent"],
-        FEATURE_COLUMNS[39]: result["erc20_avg_val_sent"],
-        FEATURE_COLUMNS[40]: result["erc20_min_val_sent_contract"],
-        FEATURE_COLUMNS[41]: result["erc20_max_val_sent_contract"],
-        FEATURE_COLUMNS[42]: result["erc20_avg_val_sent_contract"],
-        FEATURE_COLUMNS[43]: result["erc20UniqSentTokenName"],
-        FEATURE_COLUMNS[44]: result["erc20UniqRecTokenName"],
+        FEATURE_COLUMNS[0]:  _val("avg_min_between_sent"),
+        FEATURE_COLUMNS[1]:  _val("avg_min_between_rec"),
+        FEATURE_COLUMNS[2]:  _val("time_diff_first_last"),
+        FEATURE_COLUMNS[3]:  _val("sentCount"),
+        FEATURE_COLUMNS[4]:  _val("recCount"),
+        FEATURE_COLUMNS[5]:  _val("contractsCreated"),
+        FEATURE_COLUMNS[6]:  _val("uniqRecFrom"),
+        FEATURE_COLUMNS[7]:  _val("uniqSentTo"),
+        FEATURE_COLUMNS[8]:  _val("min_val_rec"),
+        FEATURE_COLUMNS[9]:  _val("max_val_rec"),
+        FEATURE_COLUMNS[10]: _val("avg_val_rec"),
+        FEATURE_COLUMNS[11]: _val("min_val_sent"),
+        FEATURE_COLUMNS[12]: _val("max_val_sent"),
+        FEATURE_COLUMNS[13]: _val("avg_val_sent"),
+        FEATURE_COLUMNS[14]: _val("min_val_sent_contract"),
+        FEATURE_COLUMNS[15]: _val("max_val_sent_contract"),
+        FEATURE_COLUMNS[16]: _val("avg_val_sent_contract"),
+        FEATURE_COLUMNS[17]: _val("total_txns"),
+        FEATURE_COLUMNS[18]: _val("totalSent"),
+        FEATURE_COLUMNS[19]: _val("totalRec"),
+        FEATURE_COLUMNS[20]: _val("total_ether_sent_contracts"),
+        FEATURE_COLUMNS[21]: _val("total_ether_balance"),
+        FEATURE_COLUMNS[22]: _val("totalErc20Tnxs"),
+        FEATURE_COLUMNS[23]: _val("erc20_total_rec"),
+        FEATURE_COLUMNS[24]: _val("erc20_total_sent"),
+        FEATURE_COLUMNS[25]: _val("erc20_total_sent_contract"),
+        FEATURE_COLUMNS[26]: _val("erc20_uniq_sent_addr"),
+        FEATURE_COLUMNS[27]: _val("erc20_uniq_rec_addr"),
+        FEATURE_COLUMNS[28]: _val("erc20_uniq_sent_addr_1"),
+        FEATURE_COLUMNS[29]: _val("erc20_uniq_rec_contract_addr"),
+        FEATURE_COLUMNS[30]: _val("erc20_avg_time_sent"),
+        FEATURE_COLUMNS[31]: _val("erc20_avg_time_rec"),
+        FEATURE_COLUMNS[32]: _val("erc20_avg_time_rec2"),
+        FEATURE_COLUMNS[33]: _val("erc20_avg_time_contract"),
+        FEATURE_COLUMNS[34]: _val("erc20_min_val_rec"),
+        FEATURE_COLUMNS[35]: _val("erc20_max_val_rec"),
+        FEATURE_COLUMNS[36]: _val("erc20_avg_val_rec"),
+        FEATURE_COLUMNS[37]: _val("erc20_min_val_sent"),
+        FEATURE_COLUMNS[38]: _val("erc20_max_val_sent"),
+        FEATURE_COLUMNS[39]: _val("erc20_avg_val_sent"),
+        FEATURE_COLUMNS[40]: _val("erc20_min_val_sent_contract"),
+        FEATURE_COLUMNS[41]: _val("erc20_max_val_sent_contract"),
+        FEATURE_COLUMNS[42]: _val("erc20_avg_val_sent_contract"),
+        FEATURE_COLUMNS[43]: _val("erc20UniqSentTokenName"),
+        FEATURE_COLUMNS[44]: _val("erc20UniqRecTokenName"),
     }
 
     return pd.DataFrame([row])

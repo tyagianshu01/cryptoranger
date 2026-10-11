@@ -60,7 +60,7 @@ app.add_middleware(
 )
 
 URI = NEO4J_URI
-AUTH = (NEO4J_USER, NEO4J_PASSWORD)
+AUTH = (NEO4J_USER, NEO4J_PASSWORD) if NEO4J_PASSWORD else None
 
 _ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _SOL_ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -250,27 +250,34 @@ def analyze_wallet(req: AnalyzeRequest):
 
     # Ensure root wallet exists in raw_nodes
     raw_nodes[wallet_id] = wallet_id
+    all_wallet_addrs = set(raw_nodes.keys())
 
     # ==============================================================
-    # 3. STAGE 0 & 2: TAINT PROPAGATION (Forward Haircut Model)
+    # 3. STAGE 3: BEHAVIOURAL PATTERNS & ROOT RISK PRE-CALCULATION
+    # ==============================================================
+    peel_wallets, peel_chains = detect_peel_chains(raw_edges)
+    p_ml_eff_root = float(ml_evaluations.get(wallet_id, {}).get("p_ml", 0.0))
+
+    # before taint: pattern first, then the root's score (origin taint = 0 inside the formula)
+    pattern_evidence = compute_pattern_evidence(raw_edges, all_wallet_addrs)
+    root_p = 1 - (1 - p_ml_eff_root) * (1 - pattern_evidence.get(wallet_id, {}).get("pattern", 0.0)) \
+                 * (1 - (P_REPORT if req.reported_role == "suspect" else 0.0))
+    seed = 1.0 if getattr(req, "confirmed", False) else max(P_REPORT, root_p)
+
+    # ==============================================================
+    # 4. STAGE 0 & 2: TAINT PROPAGATION (Forward Haircut Model with Seed Scaling)
     # ==============================================================
     native_asset = "sol" if is_sol else "eth"
     outbound_from_root = [e for e in raw_edges if e["source"] == wallet_id and e["assetType"] == native_asset]
     origin_set = get_origin_set(wallet_id, req.reported_role, outbound_from_root)
     victim_set = {wallet_id} if req.reported_role == "victim" else set()
 
-    taint_map = compute_forward_taint(
-        origin_set=origin_set,
-        transfers=raw_edges,
-        victim_wallets=victim_set,
-    )
+    taint_map = compute_forward_taint(origin_set=origin_set, transfers=raw_edges, victim_wallets=victim_set)
+    taint_map = {a: t * seed for a, t in taint_map.items()}   # taint is linear in the seed
 
     # ==============================================================
-    # 4. STAGE 3 & 5: BEHAVIOURAL PATTERNS & OFF-RAMP DISCOVERY
+    # 5. STAGE 5: OFF-RAMP DISCOVERY
     # ==============================================================
-    all_wallet_addrs = set(raw_nodes.keys())
-    peel_wallets, peel_chains = detect_peel_chains(raw_edges)
-    pattern_evidence = compute_pattern_evidence(raw_edges, all_wallet_addrs)
     off_ramp_leads = evaluate_off_ramp_leads(origin_set, raw_edges, taint_map, peel_chains)
 
     off_ramp_addrs = {o["address"].lower().strip() for o in off_ramp_leads["offRamps"]}
@@ -418,19 +425,37 @@ def analyze_wallet(req: AnalyzeRequest):
         is_token = e["assetType"] == "token"
         is_dust_tx = e["isDust"]
 
-        # Transaction Risk (Section 5):
-        # tx_risk(t) = max(round(100 * taint(u)), R(u) if class(u) == suspect else 0)
+        # Transaction Risk:
         src_taint = taint_map.get(src_addr, 0.0)
-        if is_token:
-            tx_risk = 0
-            tag = "token (not scored)"
-        elif is_dust_tx:
-            tx_risk = min(20, int(round(100.0 * src_taint)))
-            tag = "dust"
+        src_pat = pattern_evidence.get(src_addr, {}).get("pattern", 0.0)
+        dst_label = (tgt_node or {}).get("mathMetrics", {}).get("label_type", "none")
+
+        p_src = 0.5 * src_risk / 100 if src_class == "suspect" else 0.0
+        if dst_label == "mixer":
+            p_dst = 0.8
+        elif dst_label == "bridge":
+            p_dst = 0.4
+        elif tgt_class == "suspect":
+            p_dst = 0.5 * tgt_risk / 100
         else:
-            suspect_sender_risk = src_risk if src_class == "suspect" else 0
-            tx_risk = max(int(round(100.0 * src_taint)), suspect_sender_risk)
-            tag = "standard"
+            p_dst = 0.0
+
+        p = 1 - (1 - src_taint) * (1 - src_pat) * (1 - p_src) * (1 - p_dst)
+
+        # counterparty floor: har row ko us wallet ka score milta hai jo root nahi hai
+        if src_addr == wallet_id:
+            cp_risk = tgt_risk
+        elif tgt_addr == wallet_id:
+            cp_risk = src_risk
+        else:
+            cp_risk = max(src_risk, tgt_risk)
+
+        tx_risk = min(99, max(int(round(100 * p)), cp_risk))
+
+        tag = "token" if is_token else "standard"
+        if is_dust_tx or amt == 0:
+            tx_risk = min(tx_risk, 20)
+            tag = "dust" if is_dust_tx else "zero-value"
 
         is_offramp_deposit = (tgt_class == "off_ramp") or (tgt_addr in off_ramp_addrs)
         if is_offramp_deposit:

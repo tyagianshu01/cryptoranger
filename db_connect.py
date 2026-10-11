@@ -6,8 +6,11 @@ from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
 def get_db_driver():
     """Initializes and returns the Neo4j driver connection."""
+    if not NEO4J_PASSWORD:
+        print("[Neo4j Warning] NEO4J_PASSWORD is not set in .env. Attempting connection without credentials...")
     try:
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        auth = (NEO4J_USER, NEO4J_PASSWORD) if NEO4J_PASSWORD else None
+        driver = GraphDatabase.driver(NEO4J_URI, auth=auth)
         driver.verify_connectivity()
         return driver
     except Exception as e:

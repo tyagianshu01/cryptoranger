@@ -89,12 +89,15 @@ def evaluate_wallet_ml(driver, wallet_address: str, is_full_history: bool = True
                 "tau_ml": tau_ml,
             }
 
-        preds = model.predict(features_df)
+        # Predict using NumPy array to bypass any feature name string mismatches in LightGBM
+        preds = model.predict(features_df.values)
         raw_score = float(preds[0])
 
         # Stage 1: Isotonic calibration map
         calibrated_prob = float(np.interp(raw_score, knots_x, knots_y))
         is_flagged = calibrated_prob >= tau_ml
+
+        print(f"  [ML Inference] {wallet_address} -> Raw: {raw_score:.4f} | Calibrated p_ml: {calibrated_prob:.2%} | Flag: {is_flagged}")
 
         return {
             "raw_score": round(raw_score, 6),

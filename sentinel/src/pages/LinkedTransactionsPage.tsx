@@ -50,10 +50,31 @@ export function LinkedTransactionsPage() {
     return sortConfig.direction === 'asc' ? <ArrowUp size={12} color="var(--color-primary)" /> : <ArrowDown size={12} color="var(--color-primary)" />;
   };
 
-  const riskBadge = (score: number) => {
-    if (score >= 75) return { bg: 'var(--color-danger-container)', color: 'var(--color-danger)', label: 'High' };
-    if (score >= 50) return { bg: 'var(--color-warn-container)',   color: 'var(--color-warn)',   label: 'Med' };
-    return               { bg: 'var(--color-success-container)',  color: 'var(--color-success)', label: 'Low' };
+  const RiskBadge = ({ score }: { score: number }) => {
+    let bg = 'var(--color-success-container)';
+    let color = 'var(--color-success)';
+    let label = 'Low';
+    if (score >= 75) {
+      bg = 'var(--color-danger-container)';
+      color = 'var(--color-danger)';
+      label = 'High';
+    } else if (score >= 50) {
+      bg = 'var(--color-warn-container)';
+      color = 'var(--color-warn)';
+      label = 'Med';
+    }
+    return (
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+        background: bg, border: `1px solid ${color}40`,
+        borderRadius: 'var(--radius-sm)', padding: '0.125rem 0.5rem',
+      }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color }}>
+          {score.toFixed(0)}
+        </span>
+        <span className="label-sm" style={{ color }}>{label}</span>
+      </div>
+    );
   };
 
   if (!result) {
@@ -110,7 +131,6 @@ export function LinkedTransactionsPage() {
             </thead>
             <tbody>
               {transactions.map((tx, idx) => {
-                const risk = riskBadge(tx.riskScore);
                 return (
                   <tr key={`${tx.id}-${idx}`} className="table-row-hover" style={{
                     borderBottom: idx === transactions.length - 1 ? 'none' : '1px solid var(--color-border)',
@@ -140,17 +160,8 @@ export function LinkedTransactionsPage() {
                     </td>
 
                     <td style={tdStyle}>
-                      {tx.riskScore > 0 ? (
-                        <div style={{
-                          display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                          background: risk.bg, border: `1px solid ${risk.color}40`,
-                          borderRadius: 'var(--radius-sm)', padding: '0.125rem 0.5rem',
-                        }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: risk.color }}>
-                            {tx.riskScore.toFixed(0)}
-                          </span>
-                          <span className="label-sm" style={{ color: risk.color }}>{risk.label}</span>
-                        </div>
+                      {typeof tx.riskScore === "number" ? (
+                        <RiskBadge score={tx.riskScore} />
                       ) : (
                         <span style={{ color: 'var(--color-text-faint)', fontSize: '11px' }}>—</span>
                       )}
