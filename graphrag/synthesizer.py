@@ -99,10 +99,10 @@ class GraphSynthesizer:
         context: GraphContext,
         chat_history: Optional[List[dict]] = None
     ) -> GraphRAGResponse:
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             return GraphRAGResponse(
-                answer="Error: OPENROUTER_API_KEY is not configured in the environment.",
+                answer="Error: GEMINI_API_KEY is not configured in the environment.",
                 intent=context.intent,
                 citations=context.citations,
                 context_summary="Missing API key"
@@ -134,14 +134,21 @@ class GraphSynthesizer:
             ]
             messages = [messages[0]] + cleaned_history + [messages[1]]
 
+        endpoint = (
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            if os.getenv("GEMINI_API_KEY")
+            else "https://openrouter.ai/api/v1/chat/completions"
+        )
+        model = "gemini-1.5-flash" if os.getenv("GEMINI_API_KEY") else "openai/gpt-4o-mini"
+
         answer_text = ""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 res = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
+                    endpoint,
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": "openai/gpt-4o-mini",
+                        "model": model,
                         "messages": messages,
                         "temperature": 0.2,
                         "max_tokens": 700

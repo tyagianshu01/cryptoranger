@@ -132,7 +132,7 @@ class CommunityIndexer:
 
     async def summarize_cluster_with_llm(self, cluster: CommunityCluster) -> str:
         """Calls OpenRouter LLM to craft a professional, forensic community summary."""
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             return self.generate_rule_summary(cluster)
 
@@ -152,13 +152,20 @@ class CommunityIndexer:
             f"Focus on whether this cluster resembles retail usage, peel chains, consolidation, or exchange cash-out."
         )
 
+        endpoint = (
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            if os.getenv("GEMINI_API_KEY")
+            else "https://openrouter.ai/api/v1/chat/completions"
+        )
+        model = "gemini-1.5-flash" if os.getenv("GEMINI_API_KEY") else "openai/gpt-4o-mini"
+
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
+                    endpoint,
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": "openai/gpt-4o-mini",
+                        "model": model,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.2,
                         "max_tokens": 160

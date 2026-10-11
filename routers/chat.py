@@ -61,20 +61,27 @@ async def chat_message(req: ChatRequest):
         # If it's a general support question without on-chain entities or graph requests,
         # provide guidance using the Sentinel persona
         if intent_classification.intent == QueryIntent.GENERAL_SUPPORT and not intent_classification.extracted_addresses:
-            api_key = os.getenv("OPENROUTER_API_KEY")
+            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
             if not api_key:
-                raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is not set.")
+                raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set.")
 
             payload_messages = [{"role": "system", "content": SUPPORT_SYSTEM_PROMPT}]
             for msg in req.messages[-5:]:
                 payload_messages.append({"role": msg.role, "content": msg.content})
 
+            endpoint = (
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+                if os.getenv("GEMINI_API_KEY")
+                else "https://openrouter.ai/api/v1/chat/completions"
+            )
+            model = "gemini-1.5-flash" if os.getenv("GEMINI_API_KEY") else "openai/gpt-4o-mini"
+
             async with httpx.AsyncClient(timeout=25.0) as client:
                 res = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
+                    endpoint,
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": "openai/gpt-4o-mini",
+                        "model": model,
                         "messages": payload_messages,
                         "temperature": 0.3,
                         "max_tokens": 450

@@ -36,20 +36,27 @@ RULES:
 
 @router.post("/cypher/generate")
 async def generate_cypher(req: CypherGenerateRequest):
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is not set in the environment.")
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set in the environment.")
+
+    endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        if os.getenv("GEMINI_API_KEY")
+        else "https://openrouter.ai/api/v1/chat/completions"
+    )
+    model = "gemini-1.5-pro" if os.getenv("GEMINI_API_KEY") else "openai/gpt-4o-mini"
 
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                endpoint,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "openai/gpt-4o-mini",
+                    "model": model,
                     "messages": [
                         {"role": "system", "content": CYPHER_SYSTEM_PROMPT},
                         {"role": "user", "content": req.prompt}
