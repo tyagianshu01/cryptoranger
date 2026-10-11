@@ -131,9 +131,10 @@ class CommunityIndexer:
         )
 
     async def summarize_cluster_with_llm(self, cluster: CommunityCluster) -> str:
-        """Calls OpenRouter LLM to craft a professional, forensic community summary."""
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
+        """Calls Gemini or OpenRouter LLM to craft a professional, forensic community summary."""
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        openrouter_key = os.getenv("OPENROUTER_API_KEY")
+        if not gemini_key and not openrouter_key:
             return self.generate_rule_summary(cluster)
 
         members_sample = cluster.member_addresses[:6]
@@ -152,28 +153,31 @@ class CommunityIndexer:
             f"Focus on whether this cluster resembles retail usage, peel chains, consolidation, or exchange cash-out."
         )
 
-        endpoint = (
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            if os.getenv("GEMINI_API_KEY")
-            else "https://openrouter.ai/api/v1/chat/completions"
-        )
-        model = "gemini-1.5-flash" if os.getenv("GEMINI_API_KEY") else "openai/gpt-4o-mini"
-
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                res = await client.post(
-                    endpoint,
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.2,
-                        "max_tokens": 160
+                if gemini_key:
+                    model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+                    payload = {
+                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 160}
                     }
-                )
-                if res.is_success:
-                    summary = res.json()["choices"][0]["message"]["content"].strip()
-                    return summary
+                    res = await client.post(url, json=payload)
+                    if res.is_success:
+                        return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                else:
+                    res = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {openrouter_key}", "Content-Type": "application/json"},
+                        json={
+                            "model": "openai/gpt-4o-mini",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.2,
+                            "max_tokens": 160
+                        }
+                    )
+                    if res.is_success:
+                        return res.json()["choices"][0]["message"]["content"].strip()
         except Exception as e:
             logger.warning(f"Failed LLM call for {cluster.id}, falling back to rule summary: {e}")
 

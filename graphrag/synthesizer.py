@@ -99,8 +99,9 @@ class GraphSynthesizer:
         context: GraphContext,
         chat_history: Optional[List[dict]] = None
     ) -> GraphRAGResponse:
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        openrouter_key = os.getenv("OPENROUTER_API_KEY")
+        if not gemini_key and not openrouter_key:
             return GraphRAGResponse(
                 answer="Error: GEMINI_API_KEY is not configured in the environment.",
                 intent=context.intent,
@@ -110,54 +111,67 @@ class GraphSynthesizer:
 
         context_md = self._format_context_as_markdown(context)
 
-        messages = [
-            {"role": "system", "content": GRAPHRAG_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"INVESTIGATOR INQUIRY: {context.query}\n\n"
-                    f"--- RETRIEVED ON-CHAIN GRAPH CONTEXT ---\n"
-                    f"{context_md}\n"
-                    f"-----------------------------------------\n"
-                    f"Please provide a rigorous forensic response citing the specific transactions and entities above."
-                )
-            }
-        ]
-
-        if chat_history:
-            # Prepend last 3 conversation turns before current prompt for context continuity
-            history_subset = chat_history[-3:]
-            cleaned_history = [
-                {"role": m.get("role", "user"), "content": m.get("content", "")}
-                for m in history_subset
-                if m.get("content")
-            ]
-            messages = [messages[0]] + cleaned_history + [messages[1]]
-
-        endpoint = (
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            if os.getenv("GEMINI_API_KEY")
-            else "https://openrouter.ai/api/v1/chat/completions"
+        prompt_user = (
+            f"INVESTIGATOR INQUIRY: {context.query}\n\n"
+            f"--- RETRIEVED ON-CHAIN GRAPH CONTEXT ---\n"
+            f"{context_md}\n"
+            f"-----------------------------------------\n"
+            f"Please provide a rigorous forensic response citing the specific transactions and entities above."
         )
-        model = "gemini-1.5-flash" if os.getenv("GEMINI_API_KEY") else "openai/gpt-4o-mini"
 
         answer_text = ""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                res = await client.post(
-                    endpoint,
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": model,
-                        "messages": messages,
-                        "temperature": 0.2,
-                        "max_tokens": 700
+                if gemini_key:
+                    model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+                    contents = []
+                    if chat_history:
+                        for m in chat_history[-3:]:
+                            if m.get("content"):
+                                contents.append({
+                                    "role": "user" if m.get("role") == "user" else "model",
+                                    "parts": [{"text": m["content"]}]
+                                })
+                    contents.append({"role": "user", "parts": [{"text": prompt_user}]})
+                    payload = {
+                        "system_instruction": {"parts": [{"text": GRAPHRAG_SYSTEM_PROMPT}]},
+                        "contents": contents,
+                        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 700}
                     }
-                )
-                if res.is_success:
-                    answer_text = res.json()["choices"][0]["message"]["content"].strip()
+                    res = await client.post(url, json=payload)
+                    if res.is_success:
+                        answer_text = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    else:
+                        answer_text = f"AI Provider returned status {res.status_code}: {res.text}"
                 else:
-                    answer_text = f"AI Provider returned status {res.status_code}: {res.text}"
+                    messages = [
+                        {"role": "system", "content": GRAPHRAG_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt_user}
+                    ]
+                    if chat_history:
+                        history_subset = chat_history[-3:]
+                        cleaned_history = [
+                            {"role": m.get("role", "user"), "content": m.get("content", "")}
+                            for m in history_subset
+                            if m.get("content")
+                        ]
+                        messages = [messages[0]] + cleaned_history + [messages[1]]
+
+                    res = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {openrouter_key}", "Content-Type": "application/json"},
+                        json={
+                            "model": "openai/gpt-4o-mini",
+                            "messages": messages,
+                            "temperature": 0.2,
+                            "max_tokens": 700
+                        }
+                    )
+                    if res.is_success:
+                        answer_text = res.json()["choices"][0]["message"]["content"].strip()
+                    else:
+                        answer_text = f"AI Provider returned status {res.status_code}: {res.text}"
         except Exception as e:
             logger.error(f"Error calling LLM for GraphRAG synthesis: {e}")
             answer_text = f"Telemetry synthesis connection error: {str(e)}"

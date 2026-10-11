@@ -36,42 +36,47 @@ RULES:
 
 @router.post("/cypher/generate")
 async def generate_cypher(req: CypherGenerateRequest):
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    if not gemini_key and not openrouter_key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set in the environment.")
 
-    endpoint = (
-        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-        if os.getenv("GEMINI_API_KEY")
-        else "https://openrouter.ai/api/v1/chat/completions"
-    )
-    model = "gemini-1.5-pro" if os.getenv("GEMINI_API_KEY") else "openai/gpt-4o-mini"
-
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                endpoint,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": CYPHER_SYSTEM_PROMPT},
-                        {"role": "user", "content": req.prompt}
-                    ],
-                    "temperature": 0.0,
-                    "max_tokens": 800
-                },
-                timeout=30.0
-            )
-            if not response.is_success:
-                raise Exception(f"HTTP {response.status_code}: {response.text}")
-                
-            data = response.json()
-            
-        raw_cypher = data["choices"][0]["message"]["content"].strip()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if gemini_key:
+                model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+                payload = {
+                    "system_instruction": {"parts": [{"text": CYPHER_SYSTEM_PROMPT}]},
+                    "contents": [{"role": "user", "parts": [{"text": req.prompt}]}],
+                    "generationConfig": {"temperature": 0.0, "maxOutputTokens": 800}
+                }
+                response = await client.post(url, json=payload)
+                if not response.is_success:
+                    raise Exception(f"HTTP {response.status_code}: {response.text}")
+                data = response.json()
+                raw_cypher = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            else:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {openrouter_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "openai/gpt-4o-mini",
+                        "messages": [
+                            {"role": "system", "content": CYPHER_SYSTEM_PROMPT},
+                            {"role": "user", "content": req.prompt}
+                        ],
+                        "temperature": 0.0,
+                        "max_tokens": 800
+                    }
+                )
+                if not response.is_success:
+                    raise Exception(f"HTTP {response.status_code}: {response.text}")
+                data = response.json()
+                raw_cypher = data["choices"][0]["message"]["content"].strip()
         # Fallback strip if the LLM ignores instruction #1
         if raw_cypher.startswith("```"):
             lines = raw_cypher.split("\n")
