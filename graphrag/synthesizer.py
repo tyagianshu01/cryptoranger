@@ -17,7 +17,7 @@ from graphrag.schema import GraphCitation, GraphContext, GraphRAGResponse, Query
 
 logger = logging.getLogger("graphrag.synthesizer")
 
-GRAPHRAG_SYSTEM_PROMPT = """You are 'ChainTrace Intelligence Synthesizer', an elite cyber forensics AI built for blockchain financial intelligence and money laundering investigations.
+GRAPHRAG_SYSTEM_PROMPT = """You are 'CryptoTracker Intelligence Synthesizer', an elite cyber forensics AI built for blockchain financial intelligence and money laundering investigations.
 
 MISSION:
 Answer the investigator's question with surgical precision using the ON-CHAIN GRAPH CONTEXT provided below.

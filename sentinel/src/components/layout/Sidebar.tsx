@@ -40,7 +40,7 @@ export function Sidebar() {
           </div>
           <div>
             <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--color-text)', lineHeight: 1.2, letterSpacing: '-0.01em' }}>
-              ChainTrace
+              CryptoTracker
             </div>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-text-faint)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
               Analytics

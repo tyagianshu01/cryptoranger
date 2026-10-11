@@ -29,7 +29,7 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
 
 
-SUPPORT_SYSTEM_PROMPT = """You are 'Sentinel Support', an AI guidance operator for ChainTrace Analytics (CryptoTracker Sentinel).
+SUPPORT_SYSTEM_PROMPT = """You are 'Sentinel Support', an AI guidance operator for CryptoTracker Analytics (CryptoTracker Sentinel).
 Your tone is authoritative, concise, and professional.
 
 SYSTEM CONTEXT & CAPABILITIES:

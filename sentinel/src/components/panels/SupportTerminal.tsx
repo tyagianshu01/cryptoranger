@@ -19,7 +19,7 @@ interface Message {
 export function SupportTerminal() {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
-        { role: 'assistant', content: 'Hi! I\'m the ChainTrace AI assistant powered by GraphRAG. I can trace fund flows, analyze wallet neighborhoods, inspect peel chains, or guide you through the platform. What would you like to investigate?' }
+        { role: 'assistant', content: 'Hi! I\'m the CryptoTracker AI assistant powered by GraphRAG. I can trace fund flows, analyze wallet neighborhoods, inspect peel chains, or guide you through the platform. What would you like to investigate?' }
     ]);
     const [inputVal, setInputVal] = useState('');
     const [isTyping, setIsTyping] = useState(false);
@@ -123,7 +123,7 @@ export function SupportTerminal() {
                         </div>
                         <div>
                             <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', letterSpacing: '-0.01em' }}>
-                                ChainTrace Assistant
+                                CryptoTracker Assistant
                             </div>
                             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-text-faint)', letterSpacing: '0.04em' }}>
                                 AI-powered help

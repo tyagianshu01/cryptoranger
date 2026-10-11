@@ -1,4 +1,4 @@
-// ─── ChainTrace — Zustand App Store (flat state version) ───────────────────────
+// ─── CryptoTracker — Zustand App Store (flat state version) ───────────────────
 
 import { create } from 'zustand';
 import axios from 'axios';
@@ -281,7 +281,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ── Terminal log ───────────────────────────────────────────────────────────
   terminalLines: [
-    '[SYS]  ChainTrace Analytics — Initialized',
+    '[SYS]  CryptoTracker Analytics — Initialized',
     '[SYS]  Neo4j 5.x cluster | ML engine ready',
     '[SYS]  Awaiting trace target…',
   ],

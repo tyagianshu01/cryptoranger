@@ -1,7 +1,7 @@
 """
 routers/analysis.py
 ────────────────────────────────────────────────────────────────────────────
-ChainTrace Analytics — Forensic Endpoints (v2.1)
+CryptoTracker Analytics — Forensic Endpoints (v2.1)
   POST /vasp-offramps       → Directed Dijkstra & Exposure analysis (Section 5.5)
   POST /peeling-heuristics  → Chain-level peel & receive->forward latency
   POST /generate-dossier    → Court-ready neutral PDF dossier (ReportLab)
@@ -312,7 +312,7 @@ def _build_pdf(
     hr = HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e2e2e1"))
 
     # Header
-    story.append(Paragraph("CHAINTRACE ANALYTICS", title_style))
+    story.append(Paragraph("CRYPTOTRACKER ANALYTICS", title_style))
     story.append(Paragraph("Blockchain Transaction Intelligence & Forensic Audit Dossier", subtitle_style))
     story.append(Spacer(1, 4))
     story.append(hr)
@@ -416,7 +416,7 @@ def _build_pdf(
     story.append(hr)
     story.append(Spacer(1, 4))
     story.append(Paragraph(
-        f"ChainTrace Analytics Engine (v2.1) · Calibrated LightGBM ML + Forward Haircut Taint · Evidence SHA: {coc_hash[:32]}…",
+        f"CryptoTracker Analytics Engine (v2.1) · Calibrated LightGBM ML + Forward Haircut Taint · Evidence SHA: {coc_hash[:32]}…",
         subtitle_style,
     ))
 
@@ -449,7 +449,7 @@ def generate_dossier(req: DossierRequest):
         transactions=transfers,
     )
 
-    filename = f"ChainTrace_Dossier_{req.case_id.replace(' ', '_')}.pdf"
+    filename = f"CryptoTracker_Dossier_{req.case_id.replace(' ', '_')}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",

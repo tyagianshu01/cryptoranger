@@ -122,11 +122,7 @@ export function HomePage() {
 
       {/* ── Summary cards (only when trace data exists) ────────────────────── */}
       {traceResult ? (
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-          gap: '1px', borderBottom: '1px solid var(--color-border)',
-          background: 'var(--color-border)',
-        }}>
+        <div className="home-stats-strip">
           {[
             { label: 'Wallets found',    value: traceResult.nodes.length.toLocaleString(),               icon: <Database size={14} /> },
             { label: 'Transactions',     value: traceResult.edges.length.toLocaleString(),               icon: <Activity size={14} /> },
@@ -135,10 +131,7 @@ export function HomePage() {
             { label: 'Risk level',       value: riskLabel,                                                icon: <BarChart3 size={14} />,  color: riskColor },
             { label: 'VASP offramps',    value: traceResult.vaspMatches.length.toLocaleString(),         icon: <Network size={14} /> },
           ].map((card, i) => (
-            <div key={i} style={{
-              padding: '1.25rem 1.5rem', background: 'var(--color-surface-1)',
-              display: 'flex', flexDirection: 'column', gap: '0.375rem',
-            }}>
+            <div key={i} className="home-stat-card">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                 <span style={{ color: 'var(--color-text-faint)' }}>{card.icon}</span>
                 <span className="label-sm" style={{ color: 'var(--color-text-faint)' }}>{card.label}</span>
@@ -154,17 +147,20 @@ export function HomePage() {
         </div>
       ) : (
         /* Empty state strip */
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-          gap: '1px', borderBottom: '1px solid var(--color-border)',
-          background: 'var(--color-border)',
-        }}>
-          {['Wallets found', 'Transactions', 'Total volume', 'Risk score'].map((label, i) => (
-            <div key={i} style={{
-              padding: '1.25rem 1.5rem', background: 'var(--color-surface-1)',
-              display: 'flex', flexDirection: 'column', gap: '0.375rem',
-            }}>
-              <span className="label-sm" style={{ color: 'var(--color-text-faint)' }}>{label}</span>
+        <div className="home-stats-strip">
+          {[
+            { label: 'Wallets found',    icon: <Database size={14} /> },
+            { label: 'Transactions',     icon: <Activity size={14} /> },
+            { label: 'Total volume',     icon: <TrendingUp size={14} /> },
+            { label: 'Risk score',       icon: <ShieldAlert size={14} /> },
+            { label: 'Risk level',       icon: <BarChart3 size={14} /> },
+            { label: 'VASP offramps',    icon: <Network size={14} /> },
+          ].map((card, i) => (
+            <div key={i} className="home-stat-card">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                <span style={{ color: 'var(--color-text-faint)' }}>{card.icon}</span>
+                <span className="label-sm" style={{ color: 'var(--color-text-faint)' }}>{card.label}</span>
+              </div>
               <div style={{
                 fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700,
                 color: 'var(--color-surface-4)',
