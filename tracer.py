@@ -129,7 +129,7 @@ def trace_funds(initial_victim, max_depth=1, limit=None, chain="ETH"):
     """
     driver = get_db_driver()
     if not driver:
-        return []
+        return {}
 
     is_sol = chain.upper() == "SOL"
     
